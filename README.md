@@ -1,4 +1,10 @@
-# 🚀 Room-Monitoring: Arquitectura Aeroespacial (ESP32 + BME688)
+# 🧪 Room-Monitoring BME688 (ESP-IDF)
+
+![ESP-IDF v5.3.5](https://img.shields.io/badge/ESP--IDF-v5.3.5-red.svg)
+![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
+![Build](https://img.shields.io/badge/Build-Passing-brightgreen.svg)
+
+**Arquitectura Aeroespacial (ESP32 + BME688)**
 
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.3-red.svg)](https://docs.espressif.com/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
@@ -18,7 +24,23 @@ El sistema implementa patrones de grado aeroespacial para el monitoreo de ambien
 - **Tolerancia a Fallos:** Rutinas de auto-recuperación (Sanity Checks) para evitar *latch-ups* en los buses físicos I2C.
 - **Eficiencia Energética:** Uso del registro de memoria RTC (Slow Memory) para cachear datos de calibración y evitar el arranque en frío constante durante los ciclos de Deep Sleep.
 
-## Arquitectura de Hardware y Software
+## 🛠️ Requisitos de Hardware y Software
+- **Hardware:** SparkFun IoT RedBoard ESP32 (o cualquier SoC ESP32-WROOM).
+- **Sensor:** Bosch BME688 conectado al bus I2C (SDA: 21, SCL: 22).
+- **Framework:** [ESP-IDF v5.3.5](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html).
+
+## 🚀 Compilación y Flasheo (ESP-IDF)
+El proyecto hace uso de la herramienta de compilación nativa de Espressif (`idf.py`). Para compilar y monitorizar la placa:
+
+```bash
+idf.py set-target esp32
+idf.py build
+idf.py -p (PUERTO_SERIAL) flash monitor
+```
+
+---
+
+## 🎯 Arquitectura del Proyecto
 - **Core 0 (Pro Core):** Reservado exclusivamente para Telemetría Edge-to-Cloud y el stack WiFi/ESP-NOW.
 - **Core 1 (App Core):** Tareas nativas ancladas por FreeRTOS dedicadas al control del I2C, rutinas de inicialización y recuperación.
 - **Payloads Eficientes:** Uso de Protocol Buffers para condensar mediciones y evitar saturación del ancho de banda y tiempo de antena.

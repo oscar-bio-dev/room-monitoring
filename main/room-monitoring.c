@@ -90,8 +90,9 @@ static void bme688_sensor_task(void *pvParameters) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to trigger BME688 measurement: %s", esp_err_to_name(err));
     } else {
-        // El sensor BME688 tarda aprox ~150ms en completar una lectura forzada de Gas
-        vTaskDelay(pdMS_TO_TICKS(150));
+        // El sensor BME688 tarda aprox ~146ms en completar una lectura forzada de Gas (46ms TPH + 100ms Heater)
+        // Subimos el retardo a 200ms para asegurar que el bit de estabilidad térmica (heat_stab) cambie a 1
+        vTaskDelay(pdMS_TO_TICKS(200));
         
         err = bme688_read_data(dev, &sensor_data);
         if (err == ESP_OK) {
