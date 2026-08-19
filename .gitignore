@@ -1,0 +1,27 @@
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Python (Virtual environments & cache)
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+venv/
+env/
+
+# C/C++
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+
+# OS/IDEs
+.DS_Store
+.vscode/
+.idea/
