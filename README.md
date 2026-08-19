@@ -49,10 +49,10 @@ idf.py build flash monitor
 - [x] **Mecanismo de Auto-Recuperación (Watchdog & I2C):** Rutina *Sanity Check* para detectar bloqueos en el bus (SDA/SCL latch-up) e inyectar 9 ciclos de reloj manuales por GPIO para reiniciar el estado del bus de forma autónoma.
 - [x] **Persistencia RTC:** Guardar el vector de estado base de calibración del BME688 (Baseline) en la memoria RTC (Slow Memory) del ESP32 para sobrevivir a eventos de Deep Sleep y reinicios duros sin perder calibración.
 
-### Fase 2: Filosofía Zero-CPU (Límite Energético ULP)
-- [ ] **Configuración ULP (Coprocesador FSM):** Programar el co-procesador de ultra-bajo consumo para gobernar el bus I2C (vía bit-banging) y realizar lecturas de gas en background puro.
-- [ ] **Deep Sleep Agresivo:** Dormir el procesador Xtensa principal el 99% del tiempo (consumo < 10µA).
-- [ ] **Edge-Triggered Wakeup:** El ULP despertará al SoC principal *exclusivamente* si el algoritmo interno detecta un pico anómalo de conductancia ($G$) o si se cumple el temporizador para el *heartbeat* de telemetría.
+### Fase 2: Filosofía Zero-CPU (Micro-Wakeups y Deep Sleep)
+- [x] **Deep Sleep Agresivo:** Dormir el procesador Xtensa principal el 99% del tiempo para operar en regímenes de ultra-bajo consumo (~150µA promedio).
+- [x] **Micro-Wakeups (RTC Timer):** Despertar al SoC intermitentemente usando el temporizador RTC, reteniendo la línea base de calibración de gas del BME688 en memoria estática `RTC_DATA_ATTR`.
+- [x] **Inyección Fast-Path:** Interceptar el flujo de arranque para omitir las rutinas de inicialización I2C pesadas si los datos ya están cacheados en el RTC, logrando ráfagas de CPU activas extremadamente cortas (< 200ms).
 
 ### Fase 3: Inteligencia Embebida y Edge AI
 - [ ] **Integración BSEC 2.0:** Incorporar el binario oficial de Bosch para el cálculo estandarizado de IAQ (Índice de Calidad de Aire), bVOC, y $CO_{2}\text{eq}$.

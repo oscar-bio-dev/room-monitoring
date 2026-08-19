@@ -22,6 +22,7 @@
 #include "driver/gpio.h"
 #include "rom/ets_sys.h"
 #include "esp_attr.h"
+#include "esp_sleep.h"
 
 static const char *TAG = "app_main";
 
@@ -84,28 +85,35 @@ static void bme688_sensor_task(void *pvParameters) {
     bme688_device_t *dev = (bme688_device_t *)pvParameters;
     bme688_data_t sensor_data;
     
-    while (1) {
-        ESP_LOGI(TAG, "Triggering forced measurement...");
-        esp_err_t err = bme688_trigger_forced_measurement(dev);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to trigger BME688 measurement: %s", esp_err_to_name(err));
-        } else {
-            vTaskDelay(150 / portTICK_PERIOD_MS);
-            
-            err = bme688_read_data(dev, &sensor_data);
-            if (err == ESP_OK) {
-                ESP_LOGI(TAG, "Temp: %.2f °C | Hum: %.2f %% | Press: %.2f hPa | Gas Res: %.0f Ohms (Valid: %d, Stab: %d)", 
-                         sensor_data.temperature, sensor_data.humidity, sensor_data.pressure, 
-                         sensor_data.gas_res, sensor_data.gas_valid, sensor_data.heat_stab);
-            } else {
-                ESP_LOGE(TAG, "Failed to read from BME688: %s", esp_err_to_name(err));
-            }
-        }
+    ESP_LOGI(TAG, "Waking up from Deep Sleep... Triggering forced measurement...");
+    esp_err_t err = bme688_trigger_forced_measurement(dev);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to trigger BME688 measurement: %s", esp_err_to_name(err));
+    } else {
+        // El sensor BME688 tarda aprox ~150ms en completar una lectura forzada de Gas
+        vTaskDelay(pdMS_TO_TICKS(150));
         
-        // Modo LP (Low Power) a 0.33 Hz (3 segundos). 
-        // 150 ms (medición) + 2850 ms (delay) = 3000 ms.
-        vTaskDelay(2850 / portTICK_PERIOD_MS);
+        err = bme688_read_data(dev, &sensor_data);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "Temp: %.2f °C | Hum: %.2f %% | Press: %.2f hPa | Gas Res: %.0f Ohms (Valid: %d, Stab: %d)", 
+                     sensor_data.temperature, sensor_data.humidity, sensor_data.pressure, 
+                     sensor_data.gas_res, sensor_data.gas_valid, sensor_data.heat_stab);
+            
+            // Aquí en la Fase 3/4 evaluaremos el dato (Edge AI) para decidir si emitimos telemetría
+            // ...
+        } else {
+            ESP_LOGE(TAG, "Failed to read from BME688: %s", esp_err_to_name(err));
+        }
     }
+    
+    // Configurar el temporizador RTC para despertar en 3 segundos
+    const uint64_t WAKEUP_TIME_US = 3000000ULL;
+    ESP_LOGI(TAG, "Entering Deep Sleep for %llu seconds...", WAKEUP_TIME_US / 1000000ULL);
+    
+    esp_sleep_enable_timer_wakeup(WAKEUP_TIME_US);
+    
+    // Entrar en Deep Sleep (la memoria RTC retendrá rtc_calib_data)
+    esp_deep_sleep_start();
 }
 
 void app_main(void)
