@@ -66,15 +66,17 @@ idf.py build flash monitor
 ## 🗺️ Roadmap de Desarrollo
 
 ### Fase 1: Fundamentos Críticos (Capa Física y RTOS)
-- [x] **Aislamiento de Núcleos (FreeRTOS):** Asignar manejo de hardware (I2C, timers) al Core 1 (App Core) y confinar el stack de red y telemetría al Core 0 (Pro Core).
-- [x] **I2C Asíncrono Non-Blocking:** Migrar el driver actual a transacciones I2C por hardware mediante interrupciones en ESP-IDF v5, liberando por completo los ciclos de CPU durante los 150ms de lectura.
-- [x] **Mecanismo de Auto-Recuperación (Watchdog & I2C):** Rutina *Sanity Check* para detectar bloqueos en el bus (SDA/SCL latch-up) e inyectar 9 ciclos de reloj manuales por GPIO para reiniciar el estado del bus de forma autónoma.
-- [x] **Persistencia RTC:** Guardar el vector de estado base de calibración del BME688 (Baseline) en la memoria RTC (Slow Memory) del ESP32 para sobrevivir a eventos de Deep Sleep y reinicios duros sin perder calibración.
+- [x] **Arquitectura Base:** Scaffolding de un proyecto profesional nativo en ESP-IDF (CMake, componentes, tests).
+- [x] **Driver HAL BME688:** Migración *Bare-Metal* del código del sensor a la estructura de componentes.
+- [x] **I2C Asíncrono Non-Blocking:** Implementar transacciones I2C por hardware optimizadas.
+- [ ] **I2C Multiplexado:** Expandir el bus I2C a 400kHz para soportar los sensores de referencia: **SCD41** (`0x62`, NDIR CO2) y **BMV080** (`0x54`, PM Scanner óptico).
 
-### Fase 2: Filosofía Zero-CPU (Micro-Wakeups y Deep Sleep)
-- [x] **Deep Sleep Agresivo:** Dormir el procesador Xtensa principal el 99% del tiempo para operar en regímenes de ultra-bajo consumo (~150µA promedio).
-- [x] **Micro-Wakeups (RTC Timer):** Despertar al SoC intermitentemente usando el temporizador RTC, reteniendo la línea base de calibración de gas del BME688 en memoria estática `RTC_DATA_ATTR`.
-- [x] **Inyección Fast-Path:** Interceptar el flujo de arranque para omitir las rutinas de inicialización I2C pesadas si los datos ya están cacheados en el RTC, logrando ráfagas de CPU activas extremadamente cortas (< 200ms).
+### Fase 2: Sensor Fusion y Energía (Máquina de Doble Despertar)
+- [x] **Micro-Wakeups y Fast-Path:** Retención de datos en memoria estática `RTC_DATA_ATTR` para evitar la inicialización térmica completa del BME688 en cada despertar.
+- [ ] **Compensación Barométrica Cruzada:** Inyectar la lectura de presión atmosférica del BME688 en el registro NDIR del SCD41 previo al disparo para máxima precisión.
+- [ ] **Máquina de Doble Despertar (10s):** Orquestar el Deep Sleep en dos etapas (Despertar A: Iniciar óptica y láser -> Sleep 10s -> Despertar B: Cosechar mediciones de alta precisión).
+- [ ] **Retención de Estado Físico:** Implementar aislamiento `gpio_hold_en()` sobre los pines del bus para mantener la integridad de energía de la instrumentación óptica durante los 10s de sueño profundo.
+- [ ] **Deep Sleep Dinámico y Motor Predictivo:** Calcular Tasa de Cambio ($\Delta/\Delta t$) para gobernar el tiempo de sueño maestro (ej. Baseline 5m, Warning 30s, Emergency 5s).
 
 ### Fase 3: Inteligencia Embebida y Edge AI
 - [ ] **Integración BSEC 2.0:** Incorporar el binario oficial de Bosch para el cálculo estandarizado de IAQ (Índice de Calidad de Aire), bVOC, y $CO_{2}\text{eq}$.
