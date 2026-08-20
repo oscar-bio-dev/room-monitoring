@@ -82,8 +82,10 @@ idf.py build flash monitor
 - [ ] **Inferencia TinyML (Bare-Metal):** Entrenar un Perceptrón Multicapa (MLP) cuantizado en INT8 nativo en C. Tras un trigger del ULP, la CPU principal clasifica firmas químicas específicas (ej. humo vs. humedad) antes de transmitir, ahorrando ancho de banda.
 
 ### Fase 4: Telemetría Edge-to-Cloud (GCP & Firebase)
-- [ ] **Payloads Eficientes (Protobuf/CBOR):** Serializar las matrices de datos usando Protocol Buffers o CBOR para comprimir la transmisión al máximo.
-- [ ] **Enlace RF (ESP-NOW a Gateway):** Enviar telemetría en micro-ráfagas vía ESP-NOW hacia un ESP32 Gateway interno (conectado a corriente), minimizando el tiempo de antena del nodo batería.
-- [ ] **Ingesta Cloud:** El Gateway inyecta los datos a Google Cloud IoT / PubSub a través de MQTT con autenticación JWT segura.
-- [ ] **Backend de Alto Rendimiento (Rust):** Microservicio en Rust (Tokio/Axum) suscrito a Pub/Sub, encargado de la validación y almacenamiento (ej. PostgreSQL/Firestore).
-- [ ] **Frontend Distribuido (Firebase + Wasm):** Despliegue de la web alojada en Firebase. El backend envía telemetría en tiempo real al cliente vía Server-Sent Events (SSE) hacia la aplicación compilada en WebAssembly.
+- [ ] **Contrato de Datos Estricto (Protobuf):** Serializar la telemetría del BME688 usando Protocol Buffers en el nodo (ESP32) para compresión extrema.
+- [ ] **Transmisión de Ultra Baja Latencia (ESP-NOW):** El nodo transmite el Protobuf en ráfagas de milisegundos y vuelve a Deep Sleep.
+- [ ] **Gateway Unificado (ESP32 + Ethernet):** Nodo central (WT32-ETH01 / Nano ESP32 + W5500) operando con segregación de núcleos:
+    - **Core 1:** Escucha pasiva de radio 2.4GHz capturando paquetes ESP-NOW.
+    - **Core 0:** Aceleración criptográfica por hardware (TLS 1.2/1.3 + JWT) y publicación a Google Cloud Pub/Sub vía Ethernet nativo (lwIP).
+- [ ] **Backend de Alto Rendimiento (Rust):** Microservicio en Rust (Tokio/Axum) suscrito a Pub/Sub, encargado de la validación y almacenamiento.
+- [ ] **Stream de Datos al Frontend (SSE):** Endpoint Server-Sent Events (SSE) para transmitir datos unidireccionales al cliente WebAssembly (Firebase) manteniendo la pureza de Rust.
