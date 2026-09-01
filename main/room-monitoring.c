@@ -52,8 +52,6 @@ static void sensor_orchestration_task(void *pvParameters) {
     }
 
     if (!discovery_done) {
-        ESP_LOGI(TAG, "Cold boot detected. Waiting 1000ms for hardware (SCD41/BMV) to boot...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
         ESP_LOGI(TAG, "Running I2C Auto-Discovery...");
 
         esp_err_t probe_scd41  = i2c_master_probe(bus_handle, SCD41_I2C_ADDR, 100);
@@ -157,6 +155,14 @@ static void sensor_orchestration_task(void *pvParameters) {
 }
 
 void app_main(void) {
+    // Si es un Cold Boot, los sensores I2C (como el SCD41) pueden mantener la línea SDA en LOW
+    // durante hasta 1 segundo mientras su silicio interno arranca. Si inicializamos el bus ahora,
+    // el driver I2C fallará. Debemos esperar a que liberen el bus.
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) {
+        ESP_LOGI(TAG, "Hardware cold boot. Delaying 1000ms for sensors to release I2C bus...");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
     // Inicializar la capa física del bus de forma segura y encapsulada
     i2c_master_bus_handle_t bus_handle;
     if (i2c_bus_init(&bus_handle) != ESP_OK) {
