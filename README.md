@@ -25,7 +25,7 @@ stateDiagram-v2
     direction TB
     [*] --> Hardware_Boot
 
-    Hardware_Boot --> Cold_Boot: Reinicio Eléctrico
+    Hardware_Boot --> Cold_Boot: Reinicio Electrico
     Hardware_Boot --> Warm_Boot: Deep Sleep Wake
 
     state Cold_Boot {
@@ -41,15 +41,16 @@ stateDiagram-v2
         Trigger_BME688 --> Activar_Laser_BMV080
     }
 
-    WAKE_A --> Micro_Sleep_4_85s: esp_deep_sleep_start()
+    state "Micro Sleep 4.85s" as Micro_Sleep
+    WAKE_A --> Micro_Sleep: esp_deep_sleep_start
 
-    note right of Micro_Sleep_4_85s
-        Retención Eléctrica Activa:
-        gpio_hold_en() garantiza VDD
-        constante hacia los láseres I2C.
+    note right of Micro_Sleep
+        Retencion Electrica:
+        gpio_hold_en aisla
+        los pines del bus.
     end note
 
-    Micro_Sleep_4_85s --> WAKE_B: Temporizador RTC
+    Micro_Sleep --> WAKE_B: Temporizador RTC
 
     state WAKE_B {
         Leer_SCD41 --> Leer_BMV080
@@ -57,8 +58,9 @@ stateDiagram-v2
         Leer_BME688 --> Empaquetar_Protobuf
     }
 
-    WAKE_B --> Master_Sleep_5min: Transmisión ESP-NOW a Gateway
-    Master_Sleep_5min --> WAKE_A: Temporizador RTC
+    state "Master Sleep 5min" as Master_Sleep
+    WAKE_B --> Master_Sleep: Transmision ESP-NOW
+    Master_Sleep --> WAKE_A: Temporizador RTC
 ```
 
 ---
