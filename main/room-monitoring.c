@@ -155,6 +155,13 @@ static void sensor_orchestration_task(void *pvParameters) {
 }
 
 void app_main(void) {
+    // [CRÍTICO] Liberar los pines retenidos por el RTC durante el Deep Sleep.
+    // Si no hacemos esto, el controlador I2C en hardware intentará cambiar el estado de los pines
+    // pero estarán bloqueados físicamente por el dominio RTC, causando un "I2C software timeout".
+    gpio_hold_dis(I2C_MASTER_SDA_IO);
+    gpio_hold_dis(I2C_MASTER_SCL_IO);
+    gpio_deep_sleep_hold_dis();
+
     // Si es un Cold Boot, los sensores I2C (como el SCD41) pueden mantener la línea SDA en LOW
     // durante hasta 1 segundo mientras su silicio interno arranca. Si inicializamos el bus ahora,
     // el driver I2C fallará. Debemos esperar a que liberen el bus.

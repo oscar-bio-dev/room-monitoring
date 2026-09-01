@@ -17,6 +17,11 @@ static void sanity_check_i2c(void) {
                              .pull_up_en   = 1};
     gpio_config(&io_conf);
 
+    // [CRÍTICO] El registro de salida por defecto es 0. En modo Open-Drain, esto tira la línea a GND.
+    // Debemos escribir 1 explícitamente para dejar que la línea flote ALTA impulsada por las pull-ups.
+    gpio_set_level(I2C_MASTER_SDA_IO, 1);
+    gpio_set_level(I2C_MASTER_SCL_IO, 1);
+
     vTaskDelay(pdMS_TO_TICKS(10));
 
     if (gpio_get_level(I2C_MASTER_SDA_IO) == 0) {
