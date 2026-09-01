@@ -24,46 +24,47 @@
 // Componentes modulares
 #include "i2c_bus.h"
 #include "power_manager.h"
-#include "bme688.h"
+#include "bme688_bsec_wrapper.h"
 #include "scd41.h"
-#include "bmv080.h"
+#include "bmv080_wrapper.h"
 
 static const char *TAG = "app_main";
 
-// Persistencia en memoria RTC para calibración de BME688
-RTC_DATA_ATTR bme688_calib_data_t rtc_calib_data;
-RTC_DATA_ATTR bool                rtc_calib_valid = false;
+// Persistencia en memoria RTC para el estado del BSEC 3.0 (IAQ Algorithm)
+RTC_DATA_ATTR uint8_t bsec_rtc_state[139];
+RTC_DATA_ATTR bool    bsec_rtc_valid = false;
 
 // Estado del Auto-Discovery (Detectará si existe el BMV080)
 RTC_DATA_ATTR bool is_pro_model   = false;
 RTC_DATA_ATTR bool discovery_done = false;
 
-// Handlers de sensores
-static bme688_device_t         bme688_dev;
+// Handlers de sensores I2C
+static i2c_master_dev_handle_t bme688_dev = NULL;
 static i2c_master_dev_handle_t scd41_dev  = NULL;
 static i2c_master_dev_handle_t bmv080_dev = NULL;
 
 static void sensor_orchestration_task(void *pvParameters) {
     i2c_master_bus_handle_t bus_handle = (i2c_master_bus_handle_t) pvParameters;
     power_wake_state_t      state      = power_manager_get_wake_state();
+
     // Auto-Discovery I2C (Solo ocurre la primera vez tras un reinicio físico / Cold Boot)
     if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) {
-        discovery_done  = false;
-        rtc_calib_valid = false;
+        discovery_done = false;
+        bsec_rtc_valid = false;
     }
 
     if (!discovery_done) {
         ESP_LOGI(TAG, "Running I2C Auto-Discovery...");
 
-        esp_err_t probe_scd41  = i2c_master_probe(bus_handle, SCD41_I2C_ADDR, 100);
-        esp_err_t probe_bmv080 = i2c_master_probe(bus_handle, BMV080_I2C_ADDR, 100);
+        esp_err_t probe_scd41  = i2c_master_probe(bus_handle, 0x62, 100);
+        esp_err_t probe_bmv080 = i2c_master_probe(bus_handle, 0x54, 100);
 
         if (probe_scd41 == ESP_OK) {
-            ESP_LOGI(TAG, "SCD41 detected at 0x%02x", SCD41_I2C_ADDR);
+            ESP_LOGI(TAG, "SCD41 detected at 0x62");
         }
 
         if (probe_bmv080 == ESP_OK) {
-            ESP_LOGI(TAG, "BMV080 detected at 0x%02x", BMV080_I2C_ADDR);
+            ESP_LOGI(TAG, "BMV080 detected at 0x54");
             is_pro_model = true;
         } else {
             is_pro_model = false;
@@ -73,80 +74,69 @@ static void sensor_orchestration_task(void *pvParameters) {
         ESP_LOGI(TAG, "Hardware Topology: %s Model", is_pro_model ? "PRO" : "BASE");
     }
 
-    // Adjuntar los dispositivos al bus maestro I2C
+    // 1. Adjuntar dispositivos al bus
     i2c_device_config_t scd41_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = SCD41_I2C_ADDR,
-        .scl_speed_hz    = 100000,
-    };
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = 0x62, .scl_speed_hz = 100000};
     i2c_master_bus_add_device(bus_handle, &scd41_cfg, &scd41_dev);
+
+    i2c_device_config_t bme688_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = 0x76, .scl_speed_hz = 100000};
+    i2c_master_bus_add_device(bus_handle, &bme688_cfg, &bme688_dev);
 
     if (is_pro_model) {
         i2c_device_config_t bmv080_cfg = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address  = BMV080_I2C_ADDR,
-            .scl_speed_hz    = 100000,
-        };
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = 0x54, .scl_speed_hz = 100000};
         i2c_master_bus_add_device(bus_handle, &bmv080_cfg, &bmv080_dev);
     }
 
-    // Inicializar BME688 (Base line sensor)
-    esp_err_t err =
-        bme688_init(bus_handle, BME688_I2C_ADDR_PRIMARY, &bme688_dev, rtc_calib_valid ? &rtc_calib_data : NULL);
-    if (err == ESP_OK && !rtc_calib_valid) {
-        rtc_calib_data  = bme688_dev.calib;
-        rtc_calib_valid = true;
-    }
-
-    // MÁQUINA DE ESTADOS
+    // MÁQUINA DE ESTADOS (Micro-Sleep / Master-Sleep)
     if (state == PM_STATE_WAKE_A) {
         ESP_LOGI(TAG, "=== WAKE A: Simultaneous Trigger ===");
 
-        // 1. Trigger SCD41
+        // 1. Trigger SCD41 (Lento: tarda 5 segundos en procesar)
         scd41_trigger_single_shot(scd41_dev);
 
-        // 2. Trigger BMV080 Laser (Solo modelo Pro)
+        // 2. Trigger Láser BMV080 (Iniciarlo)
         if (is_pro_model) {
-            bmv080_trigger_measurement(bmv080_dev);
+            bmv080_wrapper_init(bmv080_dev);
         }
 
-        // 3. Trigger BME688
-        if (err == ESP_OK) {
-            bme688_trigger_forced_measurement(&bme688_dev);
+        // 3. Procesar BME688 con BSEC 3.0 (IAQ)
+        // El wrapper internamente enciende el heater y hace un active wait cediendo el core (Zero-CPU).
+        if (bme688_bsec_init(bme688_dev) == 0) {
+            float   iaq, temp, hum;
+            uint8_t acc;
+            bme688_bsec_read_iaq(&iaq, &acc, &temp, &hum);
+            ESP_LOGI(TAG, "BME688 (BSEC 3.0) -> IAQ: %.1f (Acc: %d) | Temp: %.2f C | Hum: %.2f %%", iaq, acc, temp,
+                     hum);
         }
 
     } else {
         ESP_LOGI(TAG, "=== WAKE B: Data Collection ===");
 
-        // 1. Leer SCD41
+        // 1. Leer SCD41 (El silicio ya terminó de procesar en estos 5 segs)
         scd41_data_t scd41_data;
         if (scd41_read_measurement(scd41_dev, &scd41_data) == ESP_OK) {
             ESP_LOGI(TAG, "SCD41   -> CO2: %u ppm | Temp: %.2f C | Hum: %.2f %%", scd41_data.co2,
                      scd41_data.temperature, scd41_data.humidity);
         }
 
-        // 2. Leer BMV080 y apagar láser
+        // 2. Leer BMV080 (Polling por la lectura actual de partículas)
         if (is_pro_model) {
-            bmv080_data_t bmv080_data;
-            if (bmv080_read_measurement(bmv080_dev, &bmv080_data) == ESP_OK) {
-                ESP_LOGI(TAG, "BMV080  -> PM2.5: %.2f ug/m3", bmv080_data.pm2_5);
+            float pm25 = 0;
+            if (bmv080_wrapper_read_pm25(&pm25) == 0) {
+                // Logueo ya realizado en el callback interno del wrapper
             }
         }
 
-        // 3. Leer BME688
-        if (err == ESP_OK) {
-            bme688_data_t sensor_data;
-            if (bme688_read_data(&bme688_dev, &sensor_data) == ESP_OK) {
-                ESP_LOGI(TAG, "BME688  -> Temp: %.2f C | Hum: %.2f %% | Press: %.2f hPa | Gas: %.0f Ohms",
-                         sensor_data.temperature, sensor_data.humidity, sensor_data.pressure, sensor_data.gas_res);
-            }
-        }
+        // El BME688 ya fue leído en WAKE_A ya que su heater cycle es rápido (aprox 150ms).
 
-        // 4. Empaquetar y Transmitir Protobuf (Fase 4)
+        // 4. Empaquetar y Transmitir Protobuf (Fase 4 - Futuro GCP/Firebase)
     }
 
     // Limpiar handlers para evitar memory leaks antes del sleep
     i2c_master_bus_rm_device(scd41_dev);
+    i2c_master_bus_rm_device(bme688_dev);
     if (is_pro_model) {
         i2c_master_bus_rm_device(bmv080_dev);
     }
