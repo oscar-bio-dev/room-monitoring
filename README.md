@@ -72,10 +72,11 @@ idf.py build flash monitor
 - [ ] **I2C Multiplexado:** Expandir el bus I2C a 400kHz para soportar los sensores de referencia: **SCD41** (`0x62`, NDIR CO2) y **BMV080** (`0x54`, PM Scanner óptico).
 
 ### Fase 2: Sensor Fusion y Energía (Máquina de Doble Despertar)
-- [x] **Micro-Wakeups y Fast-Path:** Retención de datos en memoria estática `RTC_DATA_ATTR` para evitar la inicialización térmica completa del BME688 en cada despertar.
-- [ ] **Compensación Barométrica Cruzada:** Inyectar la lectura de presión atmosférica del BME688 en el registro NDIR del SCD41 previo al disparo para máxima precisión.
-- [ ] **Máquina de Doble Despertar (10s):** Orquestar el Deep Sleep en dos etapas (Despertar A: Iniciar óptica y láser -> Sleep 10s -> Despertar B: Cosechar mediciones de alta precisión).
-- [ ] **Retención de Estado Físico:** Implementar aislamiento `gpio_hold_en()` sobre los pines del bus para mantener la integridad de energía de la instrumentación óptica durante los 10s de sueño profundo.
+- [x] **Micro-Wakeups y Fast-Path:** Retención de datos en memoria estática `RTC_DATA_ATTR` para evitar la inicialización térmica del BME688 en cada despertar.
+- [ ] **Variantes de Producto (Auto-Discovery):** Escaneo I2C en arranque frío para detectar el modelo del nodo (Modelo Base: BME688+SCD41 | Modelo Pro: BME688+SCD41+BMV080) y cachear la topología en memoria RTC.
+- [ ] **Despertar A (Disparo Simultáneo):** Disparar lectura SCD41 -> Encender láser BMV080 -> Ejecutar lectura BME688 y cruzar presión barométrica al SCD41 -> Deep Sleep de 4.85s (Ultra-Bajo Consumo).
+- [ ] **Despertar B (Recolección):** Leer SCD41 -> Leer conteo BMV080 -> Apagar láser -> Empaquetar "Holy Trinity Protobuf" -> Transmitir ESP-NOW.
+- [ ] **Retención de Estado Físico:** Implementar aislamiento `gpio_hold_en()` sobre los pines del bus para mantener la energía ininterrumpida de la instrumentación óptica durante los 4.85s de sueño profundo.
 - [ ] **Deep Sleep Dinámico y Motor Predictivo:** Calcular Tasa de Cambio ($\Delta/\Delta t$) para gobernar el tiempo de sueño maestro (ej. Baseline 5m, Warning 30s, Emergency 5s).
 
 ### Fase 3: Inteligencia Embebida y Edge AI
