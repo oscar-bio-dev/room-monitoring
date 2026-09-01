@@ -47,7 +47,9 @@ static void sensor_orchestration_task(void *pvParameters) {
 
     // Auto-Discovery I2C (Solo ocurre la primera vez tras un reinicio físico / Cold Boot)
     if (!discovery_done) {
-        ESP_LOGI(TAG, "Cold boot detected. Running I2C Auto-Discovery...");
+        ESP_LOGI(TAG, "Cold boot detected. Waiting 1000ms for hardware (SCD41/BMV) to boot...");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        ESP_LOGI(TAG, "Running I2C Auto-Discovery...");
 
         esp_err_t probe_scd41  = i2c_master_probe(bus_handle, SCD41_I2C_ADDR, 100);
         esp_err_t probe_bmv080 = i2c_master_probe(bus_handle, BMV080_I2C_ADDR, 100);
