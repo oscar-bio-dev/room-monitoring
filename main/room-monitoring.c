@@ -18,6 +18,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_attr.h"
+#include "esp_sleep.h"
 
 // Componentes modulares
 #include "i2c_bus.h"
@@ -44,8 +45,12 @@ static i2c_master_dev_handle_t bmv080_dev = NULL;
 static void sensor_orchestration_task(void *pvParameters) {
     i2c_master_bus_handle_t bus_handle = (i2c_master_bus_handle_t) pvParameters;
     power_wake_state_t      state      = power_manager_get_wake_state();
-
     // Auto-Discovery I2C (Solo ocurre la primera vez tras un reinicio físico / Cold Boot)
+    if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) {
+        discovery_done  = false;
+        rtc_calib_valid = false;
+    }
+
     if (!discovery_done) {
         ESP_LOGI(TAG, "Cold boot detected. Waiting 1000ms for hardware (SCD41/BMV) to boot...");
         vTaskDelay(pdMS_TO_TICKS(1000));
