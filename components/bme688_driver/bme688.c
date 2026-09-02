@@ -70,6 +70,9 @@ static uint8_t calc_res_heat(bme688_device_t *dev, float target_temp, float amb_
 
 esp_err_t bme688_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, bme688_device_t *dev,
                       const bme688_calib_data_t *cached_calib) {
+    if (!bus_handle || !dev || (i2c_addr != BME688_I2C_ADDR_PRIMARY && i2c_addr != BME688_I2C_ADDR_SECONDARY))
+        return ESP_ERR_INVALID_ARG;
+
     i2c_device_config_t dev_cfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address  = i2c_addr,
@@ -88,7 +91,9 @@ esp_err_t bme688_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, bme6
     }
 
     // Soft reset
-    write_reg(dev, BME688_REG_RESET, 0xB6);
+    err = write_reg(dev, BME688_REG_RESET, 0xB6);
+    if (err != ESP_OK)
+        return err;
     vTaskDelay(10 / portTICK_PERIOD_MS);
 
     // Si tenemos calibración en la memoria RTC, la usamos y ahorramos milisegundos y batería
@@ -101,13 +106,19 @@ esp_err_t bme688_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, bme6
     // Read Calibration Data Block 1 (0x8A to 0xA0) and Block 2 (0xE1 to 0xF0)
     // To simplify, we will read them byte by byte or in small chunks
     uint8_t c1[24]; // 0x8A to 0xA1
-    read_regs(dev, 0x8A, c1, 24);
+    err = read_regs(dev, 0x8A, c1, 24);
+    if (err != ESP_OK)
+        return err;
 
     uint8_t c2[16]; // 0xE1 to 0xF0
-    read_regs(dev, 0xE1, c2, 16);
+    err = read_regs(dev, 0xE1, c2, 16);
+    if (err != ESP_OK)
+        return err;
 
-    uint8_t c3[3];               // 0x00, 0x02
-    read_regs(dev, 0x00, c3, 3); // Reads 0x00 to 0x02
+    uint8_t c3[3];                     // 0x00, 0x02
+    err = read_regs(dev, 0x00, c3, 3); // Reads 0x00 to 0x02
+    if (err != ESP_OK)
+        return err;
 
     bme688_calib_data_t *calib = &dev->calib;
     // T
@@ -148,31 +159,45 @@ esp_err_t bme688_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, bme6
 }
 
 esp_err_t bme688_trigger_forced_measurement(bme688_device_t *dev) {
+    if (!dev || !dev->i2c_dev)
+        return ESP_ERR_INVALID_ARG;
+
     // 1. Oversampling: Humidity 1x
-    write_reg(dev, BME688_REG_CTRL_HUM, 0x01); // osrs_h = 1 (1x)
+    esp_err_t err = write_reg(dev, BME688_REG_CTRL_HUM, 0x01); // osrs_h = 1 (1x)
+    if (err != ESP_OK)
+        return err;
 
     // 2. Set Gas Heater (Step 0): 300C for 100ms
     // Wait time: 100ms. Code = 0x59 (from datasheet example 3.5.1)
-    write_reg(dev, BME688_REG_GAS_WAIT_0, 0x59);
+    err = write_reg(dev, BME688_REG_GAS_WAIT_0, 0x59);
+    if (err != ESP_OK)
+        return err;
 
     // Calculate and set target resistance for 300C (assuming 25C ambient as baseline)
     uint8_t res_heat = calc_res_heat(dev, 300.0, 25.0);
-    write_reg(dev, BME688_REG_RES_HEAT_0, res_heat);
+    err              = write_reg(dev, BME688_REG_RES_HEAT_0, res_heat);
+    if (err != ESP_OK)
+        return err;
 
     // Enable gas conversion, set heater profile index to 0
-    write_reg(dev, BME688_REG_CTRL_GAS_1, 0x20); // run_gas = 1, nb_conv = 0
+    err = write_reg(dev, BME688_REG_CTRL_GAS_1, 0x20); // run_gas = 1, nb_conv = 0
+    if (err != ESP_OK)
+        return err;
 
     // 3. Oversampling T=2x, P=16x, Mode = Forced
     // osrs_t (bits 7:5) = 010 (2) -> 2x
     // osrs_p (bits 4:2) = 101 (5) -> 16x
     // mode (bits 1:0) = 01 (1) -> Forced
     uint8_t ctrl_meas_val = (2 << 5) | (5 << 2) | 1;
-    write_reg(dev, BME688_REG_CTRL_MEAS, ctrl_meas_val);
+    err                   = write_reg(dev, BME688_REG_CTRL_MEAS, ctrl_meas_val);
 
-    return ESP_OK;
+    return err;
 }
 
 esp_err_t bme688_read_data(bme688_device_t *dev, bme688_data_t *out_data) {
+    if (!dev || !dev->i2c_dev || !out_data)
+        return ESP_ERR_INVALID_ARG;
+
     uint8_t   data[15];
     esp_err_t err = read_regs(dev, BME688_REG_PRESS_MSB, data, 15);
     if (err != ESP_OK)

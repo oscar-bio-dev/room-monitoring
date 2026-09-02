@@ -28,8 +28,9 @@ void power_manager_execute_sleep_cycle(void) {
         // Preparar para despertar en B
         current_wake_state = PM_STATE_WAKE_B;
 
-        ESP_LOGI(TAG, "Entering Micro-Sleep (4.85s). Active wait to preserve I2C/FreeRTOS context...");
-        vTaskDelay(pdMS_TO_TICKS(4850));
+        ESP_LOGI(TAG, "Entering Micro-Sleep (4.85s)...");
+        esp_sleep_enable_timer_wakeup(MICROSLEEP_TIME_US);
+        esp_light_sleep_start();
     } else {
         // Preparar para el siguiente ciclo maestro en A
         current_wake_state = PM_STATE_WAKE_A;

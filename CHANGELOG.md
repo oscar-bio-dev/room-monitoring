@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- Validación CRC-8 de todas las palabras de medición SCD41 y reintentos limitados para sus operaciones I2C.
+- Métricas de diagnóstico de despertar, reinicio, heap y margen mínimo de stack.
+
+### Changed
+- El micro-sleep de 4,85 segundos usa Light Sleep para conservar el contexto de sensores.
+- Las operaciones de BME688 y BMV080 propagan fallos, validan argumentos y limitan transferencias del SDK BMV080.
+- Se retiró el controlador BMV080 simulado no integrado; el firmware usa exclusivamente el wrapper del SDK oficial.
+
 ## [0.4.0] - 2026-09-01
 ### Added
 - Integración completa de sensores **SCD41** (CO2) y **BMV080** (PM2.5).

@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_attr.h"
+#include <stdlib.h>
 
 static const char *TAG = "bme688_bsec";
 
@@ -60,6 +61,8 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle) {
     bsec_library_return_t bsec_status = bsec_init(bsec_instance);
     if (bsec_status != BSEC_OK) {
         ESP_LOGE(TAG, "Error inicializando BSEC 3.0: %d", bsec_status);
+        free(bsec_instance);
+        bsec_instance = NULL;
         return -1;
     }
 
@@ -135,7 +138,10 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
         conf.os_pres = bme_settings.pressure_oversampling;
         conf.filter  = BME68X_FILTER_OFF;
         conf.odr     = BME68X_ODR_NONE;
-        bme68x_set_conf(&conf, &bme_dev);
+        if (bme68x_set_conf(&conf, &bme_dev) != BME68X_OK) {
+            ESP_LOGE(TAG, "Failed to configure BME688");
+            return -1;
+        }
 
         heatr_conf.enable          = bme_settings.run_gas;
         heatr_conf.heatr_temp      = bme_settings.heater_temperature;
@@ -143,9 +149,15 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
         heatr_conf.heatr_temp_prof = &bme_settings.heater_temperature_profile[0];
         heatr_conf.heatr_dur_prof  = &bme_settings.heater_duration_profile[0];
         heatr_conf.profile_len     = bme_settings.heater_profile_len;
-        bme68x_set_heatr_conf(bme_settings.op_mode, &heatr_conf, &bme_dev);
+        if (bme68x_set_heatr_conf(bme_settings.op_mode, &heatr_conf, &bme_dev) != BME68X_OK) {
+            ESP_LOGE(TAG, "Failed to configure BME688 heater");
+            return -1;
+        }
 
-        bme68x_set_op_mode(bme_settings.op_mode, &bme_dev);
+        if (bme68x_set_op_mode(bme_settings.op_mode, &bme_dev) != BME68X_OK) {
+            ESP_LOGE(TAG, "Failed to start BME688 measurement");
+            return -1;
+        }
 
         // Polling para esperar la medición (zero-cpu delay loop manual para BSEC)
         uint32_t meas_dur = bme68x_get_meas_dur(bme_settings.op_mode, &conf, &bme_dev);
@@ -155,7 +167,10 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
 
         struct bme68x_data data[3];
         uint8_t            n_fields = 0;
-        bme68x_get_data(bme_settings.op_mode, data, &n_fields, &bme_dev);
+        if (bme68x_get_data(bme_settings.op_mode, data, &n_fields, &bme_dev) != BME68X_OK) {
+            ESP_LOGE(TAG, "Failed to read BME688 measurement");
+            return -1;
+        }
 
         if (n_fields > 0) {
             bsec_input_t inputs[BSEC_MAX_PHYSICAL_SENSOR];
@@ -190,7 +205,11 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
             uint8_t       n_outputs = BSEC_NUMBER_OUTPUTS;
 
             // Inyectar al BSEC 3.0 para procesar IAQ
-            bsec_do_steps(bsec_instance, inputs, n_inputs, outputs, &n_outputs);
+            bsec_status = bsec_do_steps(bsec_instance, inputs, n_inputs, outputs, &n_outputs);
+            if (bsec_status < BSEC_OK) {
+                ESP_LOGE(TAG, "BSEC processing failed: %d", bsec_status);
+                return -1;
+            }
 
             for (uint8_t i = 0; i < n_outputs; i++) {
                 if (outputs[i].sensor_id == BSEC_OUTPUT_IAQ) {
@@ -212,6 +231,8 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
                                                        work_buffer, sizeof(work_buffer), &actual_len);
             if (res == BSEC_OK) {
                 rtc_bsec_state_valid = true;
+            } else {
+                ESP_LOGW(TAG, "Failed to persist BSEC state: %d", res);
             }
         }
     }

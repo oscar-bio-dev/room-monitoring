@@ -5,6 +5,19 @@
 
 static const char *TAG = "SCD41";
 
+static uint8_t scd41_crc8(const uint8_t *data, size_t length) {
+    uint8_t crc = 0xFF;
+
+    for (size_t i = 0; i < length; i++) {
+        crc ^= data[i];
+        for (uint8_t bit = 0; bit < 8; bit++) {
+            crc = (crc & 0x80) ? (crc << 1) ^ 0x31 : crc << 1;
+        }
+    }
+
+    return crc;
+}
+
 esp_err_t scd41_trigger_single_shot(i2c_master_dev_handle_t dev_handle) {
     if (!dev_handle)
         return ESP_ERR_INVALID_ARG;
@@ -34,6 +47,14 @@ esp_err_t scd41_read_measurement(i2c_master_dev_handle_t dev_handle, scd41_data_
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to read SCD41 data: %s", esp_err_to_name(err));
         return err;
+    }
+
+    for (size_t word = 0; word < 3; word++) {
+        const size_t offset = word * 3;
+        if (scd41_crc8(&rx_buf[offset], 2) != rx_buf[offset + 2]) {
+            ESP_LOGE(TAG, "Invalid CRC in SCD41 measurement word %u", (unsigned int) word);
+            return ESP_ERR_INVALID_CRC;
+        }
     }
 
     // Decodificar CO2

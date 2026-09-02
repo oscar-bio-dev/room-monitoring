@@ -19,9 +19,9 @@ typedef enum {
 power_wake_state_t power_manager_get_wake_state(void);
 
 /**
- * @brief Entra en Deep Sleep manteniendo los pines aislados según el estándar AGENTS.md.
- *        Si estamos en WAKE_A, programa el micro-sleep de 4.85s.
- *        Si estamos en WAKE_B, programa el sleep principal (ej. 5 minutos).
+ * @brief Entra en Light Sleep para WAKE_A o Deep Sleep con pines aislados para WAKE_B.
+ *        WAKE_A conserva el contexto I2C y FreeRTOS durante el micro-sleep de 4.85s.
+ *        WAKE_B programa el sleep principal (ej. 5 minutos).
  */
 void power_manager_execute_sleep_cycle(void);
 
