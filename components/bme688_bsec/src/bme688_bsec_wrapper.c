@@ -7,8 +7,12 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_attr.h"
 
 static const char *TAG = "bme688_bsec";
+
+RTC_DATA_ATTR static uint8_t rtc_bsec_state[BSEC_MAX_STATE_BLOB_SIZE];
+RTC_DATA_ATTR static bool    rtc_bsec_state_valid = false;
 
 static struct bme68x_dev bme_dev;
 static float             current_iaq          = 0.0f;
@@ -57,6 +61,18 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle) {
     if (bsec_status != BSEC_OK) {
         ESP_LOGE(TAG, "Error inicializando BSEC 3.0: %d", bsec_status);
         return -1;
+    }
+
+    if (rtc_bsec_state_valid) {
+        uint8_t               work_buffer[BSEC_MAX_WORKBUFFER_SIZE];
+        bsec_library_return_t res =
+            bsec_set_state(bsec_instance, rtc_bsec_state, BSEC_MAX_STATE_BLOB_SIZE, work_buffer, sizeof(work_buffer));
+        if (res == BSEC_OK) {
+            ESP_LOGI(TAG, "BSEC state restored from RTC memory.");
+        } else {
+            ESP_LOGE(TAG, "BSEC restore failed: %d", res);
+            rtc_bsec_state_valid = false;
+        }
     }
 
     // 3. Suscripciones BSEC (Las salidas que queremos que el algoritmo calcule)
@@ -187,6 +203,15 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
                 if (outputs[i].sensor_id == BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY) {
                     current_hum = outputs[i].signal;
                 }
+            }
+
+            // Save state for deep sleep persistence
+            uint8_t               work_buffer[BSEC_MAX_WORKBUFFER_SIZE];
+            uint32_t              actual_len = 0;
+            bsec_library_return_t res = bsec_get_state(bsec_instance, 0, rtc_bsec_state, BSEC_MAX_STATE_BLOB_SIZE,
+                                                       work_buffer, sizeof(work_buffer), &actual_len);
+            if (res == BSEC_OK) {
+                rtc_bsec_state_valid = true;
             }
         }
     }

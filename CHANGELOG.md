@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-01
+### Added
+- Integración completa de sensores **SCD41** (CO2) y **BMV080** (PM2.5).
+- Soporte para **BSEC 3.0** con preservación de estado ULP en memoria RTC.
+- Aislamiento eléctrico completo en Deep Sleep reteniendo `SDA` y `SCL` en `HIGH` usando `gpio_hold_en` para prevenir corrupciones I2C (Clock Glitching).
+- Emisión de **I2C General Call Reset** (0x00 -> 0x06) en la inicialización del bus para resetear por hardware a esclavos Bosch.
+
+### Fixed
+- **Amnesia de Auto-Escáner I2C:** Se declararon las variables de dirección I2C dinámica (`dynamic_bmv_addr`, `dynamic_bme_addr`) bajo `RTC_DATA_ATTR`. Esto evita que el ESP32 restablezca las direcciones a sus valores por defecto al despertar del Deep Sleep, solucionando rechazos fantasma (`NACK`).
+- **SDK Bosch Pointer Crash:** Implementación de sanitización manual (`bmv080_handle = NULL`) antes de reintentos I2C, eludiendo el error interno `180 (E_BMV080_ERROR_NULLPTR)` del driver oficial de Bosch.
+
 ## [0.3.0] - 2026-09-01
 ### Added
 - Componente `power_manager`: Máquina de estados de Doble Despertar (4.85s) con aislamiento físico `gpio_hold_en()`.

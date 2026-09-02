@@ -24,28 +24,24 @@ static void sanity_check_i2c(void) {
 
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    if (gpio_get_level(I2C_MASTER_SDA_IO) == 0) {
-        ESP_LOGW(TAG, "SDA line is LOW! I2C slave is stuck. Injecting clock pulses...");
-        for (int i = 0; i < 9; i++) {
-            gpio_set_level(I2C_MASTER_SCL_IO, 0);
-            ets_delay_us(5);
-            gpio_set_level(I2C_MASTER_SCL_IO, 1);
-            ets_delay_us(5);
-        }
-
-        // Condición STOP
-        gpio_set_level(I2C_MASTER_SDA_IO, 0);
+    ESP_LOGI(TAG, "Injecting 9 clock pulses and STOP condition to reset slave state machines...");
+    for (int i = 0; i < 9; i++) {
+        gpio_set_level(I2C_MASTER_SCL_IO, 0);
         ets_delay_us(5);
         gpio_set_level(I2C_MASTER_SCL_IO, 1);
         ets_delay_us(5);
-        gpio_set_level(I2C_MASTER_SDA_IO, 1);
-        ets_delay_us(10);
+    }
 
-        if (gpio_get_level(I2C_MASTER_SDA_IO) == 0) {
-            ESP_LOGE(TAG, "Failed to recover I2C bus!");
-        } else {
-            ESP_LOGI(TAG, "I2C bus recovered successfully.");
-        }
+    // Condición STOP
+    gpio_set_level(I2C_MASTER_SDA_IO, 0);
+    ets_delay_us(5);
+    gpio_set_level(I2C_MASTER_SCL_IO, 1);
+    ets_delay_us(5);
+    gpio_set_level(I2C_MASTER_SDA_IO, 1);
+    ets_delay_us(10);
+
+    if (gpio_get_level(I2C_MASTER_SDA_IO) == 0) {
+        ESP_LOGE(TAG, "Failed to recover I2C bus! SDA is still LOW.");
     } else {
         ESP_LOGI(TAG, "I2C bus sanity check passed. Lines are high.");
     }

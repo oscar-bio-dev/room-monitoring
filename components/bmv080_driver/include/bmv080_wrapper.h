@@ -19,10 +19,15 @@ bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle)
 /**
  * @brief Obtiene la última lectura de PM2.5 del láser
  *
- * @param pm2_5 Puntero donde se almacenará la densidad en ug/m3
- * @return bmv080_status_code_t Código de estado oficial de Bosch
+ * @param pm25_out Puntero donde se almacenará el resultado (ug/m3)
+ * @return int 0 si fue exitoso, <0 si hubo error.
  */
-bmv080_status_code_t bmv080_wrapper_read_pm25(float *pm2_5);
+int bmv080_wrapper_read_pm25(float *pm25_out);
+
+/**
+ * @brief Detiene la medición y cierra el handle del sensor
+ */
+void bmv080_wrapper_deinit(void);
 
 #ifdef __cplusplus
 }

@@ -4,75 +4,116 @@
 #include "freertos/task.h"
 #include <string.h>
 
-static const char     *TAG           = "bmv080_wrapper";
+static const char *TAG = "bmv080_wrapper";
+// Handle del SDK de Bosch
 static bmv080_handle_t bmv080_handle = NULL;
-static float           last_pm25     = 0.0f;
+// Handle del Bus I2C de ESP-IDF (cacheado para evadir bugs de contexto del SDK)
+static i2c_master_dev_handle_t s_bmv080_i2c_dev = NULL;
+static float                   last_pm25        = 0.0f;
 
 // Tiempo máximo de espera para transacciones I2C
-#define BMV080_I2C_TIMEOUT_MS 100
+// Durante la descarga de firmware, el sensor hace clock-stretching para grabar en memoria.
+// 100ms (10 ticks) demostró ser insuficiente (I2C software timeout a los 10 ticks exactos).
+#define BMV080_I2C_TIMEOUT_MS 1000
 
-// Callback de retardo para la API de Bosch
+// Función de retardo (callback para Bosch SDK)
 static int8_t bmv080_delay_ms(uint32_t period) {
-    vTaskDelay(pdMS_TO_TICKS(period));
+    if (period == 0)
+        return 0;
+    uint32_t ticks = pdMS_TO_TICKS(period);
+    if (ticks > 0) {
+        vTaskDelay(ticks);
+    } else {
+        esp_rom_delay_us(period * 1000);
+    }
     return 0; // 0 = E_COMBRIDGE_OK
 }
 
-// Callback de lectura I2C (16-bit header, 16-bit payload little endian)
+// Wrapper I2C Read para el SDK de Bosch
 static int8_t bmv080_i2c_read_16bit(bmv080_sercom_handle_t handle, uint16_t header, uint16_t *payload,
                                     uint16_t payload_length) {
-    i2c_master_dev_handle_t dev_handle = (i2c_master_dev_handle_t) handle;
+    // IGNORAR el parámetro 'handle' que provee el SDK.
+    // bmv080_serve_interrupt tiene un bug conocido donde pasa el contexto propio en vez del intf_ptr.
+    i2c_master_dev_handle_t dev_handle = s_bmv080_i2c_dev;
 
-    // Header shift left by 1 (R/W bit in hardware I2C handled by ESP-IDF, but API design expects this shift for
-    // internal register maps)
-    uint16_t header_adjusted = header << 1;
-    uint8_t  tx_buf[2]       = {(uint8_t) (header_adjusted >> 8), (uint8_t) (header_adjusted & 0xFF)};
+    if (!dev_handle) {
+        ESP_LOGE(TAG, "FATAL: s_bmv080_i2c_dev IS NULL!");
+        return -1;
+    }
+
+    header = header << 1;
+
+    uint8_t tx_buf[2] = {(uint8_t) (header >> 8), (uint8_t) (header & 0xFF)};
+
+    ESP_LOGI(TAG, "Calling i2c_master_transmit...");
+    esp_err_t err = i2c_master_transmit(dev_handle, tx_buf, 2, pdMS_TO_TICKS(BMV080_I2C_TIMEOUT_MS));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "i2c_master_transmit failed: %s", esp_err_to_name(err));
+        return -1;
+    }
+
+    if (payload_length == 0) {
+        return 0;
+    }
 
     uint16_t rx_len = payload_length * 2;
     uint8_t *rx_buf = (uint8_t *) malloc(rx_len);
     if (!rx_buf)
         return -1;
 
-    esp_err_t err =
-        i2c_master_transmit_receive(dev_handle, tx_buf, 2, rx_buf, rx_len, pdMS_TO_TICKS(BMV080_I2C_TIMEOUT_MS));
+    // Receive payload (STOP/START condition respected)
+    err = i2c_master_receive(dev_handle, rx_buf, rx_len, pdMS_TO_TICKS(BMV080_I2C_TIMEOUT_MS));
     if (err != ESP_OK) {
+        ESP_LOGE("BMV080_I2C", "Receive payload NACK!");
         free(rx_buf);
         return -1;
     }
 
-    // Convert big endian wire format to little endian payload
+    // Convert big endian wire format to native uint16_t
     for (uint16_t i = 0; i < payload_length; i++) {
-        uint16_t word = (rx_buf[i * 2] << 8) | rx_buf[i * 2 + 1];
-        payload[i]    = ((word << 8) | (word >> 8)) & 0xFFFF; // Swap bytes
+        payload[i] = (rx_buf[i * 2] << 8) | rx_buf[i * 2 + 1];
     }
 
     free(rx_buf);
+
+    // Bosch ASIC needs a tiny breath between back-to-back fast reads
+    esp_rom_delay_us(2000); // 2ms busy-wait to guarantee delay regardless of RTOS tick rate
+
     return 0;
 }
 
-// Callback de escritura I2C (16-bit header, 16-bit payload little endian)
+// Wrapper I2C Write para el SDK de Bosch
 static int8_t bmv080_i2c_write_16bit(bmv080_sercom_handle_t handle, uint16_t header, const uint16_t *payload,
                                      uint16_t payload_length) {
-    i2c_master_dev_handle_t dev_handle = (i2c_master_dev_handle_t) handle;
+    // IGNORAR el parámetro 'handle' (ver bmv080_i2c_read_16bit)
+    i2c_master_dev_handle_t dev_handle = s_bmv080_i2c_dev;
 
-    uint16_t header_adjusted = header << 1;
+    header = header << 1;
 
     uint16_t tx_len = 2 + (payload_length * 2);
     uint8_t *tx_buf = (uint8_t *) malloc(tx_len);
     if (!tx_buf)
         return -1;
 
-    tx_buf[0] = (uint8_t) (header_adjusted >> 8);
-    tx_buf[1] = (uint8_t) (header_adjusted & 0xFF);
+    // Header MSB first
+    tx_buf[0] = (uint8_t) (header >> 8);
+    tx_buf[1] = (uint8_t) (header & 0xFF);
 
     for (uint16_t i = 0; i < payload_length; i++) {
-        // Swap bytes from little endian to big endian for wire format
-        uint16_t swapped        = ((payload[i] << 8) | (payload[i] >> 8)) & 0xFFFF;
-        tx_buf[2 + (i * 2)]     = (uint8_t) (swapped >> 8);
-        tx_buf[2 + (i * 2) + 1] = (uint8_t) (swapped & 0xFF);
+        // Send MSB first for each native word
+        tx_buf[2 + (i * 2)]     = (uint8_t) (payload[i] >> 8);
+        tx_buf[2 + (i * 2) + 1] = (uint8_t) (payload[i] & 0xFF);
     }
 
     esp_err_t err = i2c_master_transmit(dev_handle, tx_buf, tx_len, pdMS_TO_TICKS(BMV080_I2C_TIMEOUT_MS));
+    if (err != ESP_OK) {
+        ESP_LOGE("BMV080_I2C", "Write NACK! header=0x%04X", header);
+    }
+
     free(tx_buf);
+
+    // Bosch ASIC needs a tiny breath after writes
+    esp_rom_delay_us(2000); // 2ms busy-wait to guarantee delay
 
     return (err == ESP_OK) ? 0 : -1;
 }
@@ -90,11 +131,23 @@ static void bmv080_data_ready_callback(bmv080_output_t bmv080_output, void *call
 bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle) {
     bmv080_status_code_t rslt;
 
-    // Inicializar el Handle del BMV080
-    rslt = bmv080_open(&bmv080_handle, (bmv080_sercom_handle_t) i2c_dev_handle, bmv080_i2c_read_16bit,
-                       bmv080_i2c_write_16bit, bmv080_delay_ms);
+    // Guardar el handle I2C globalmente para los callbacks
+    s_bmv080_i2c_dev = i2c_dev_handle;
+
+    // Inicializar el Handle del BMV080 con reintentos en caso de NACK tras Deep Sleep
+    for (int retry = 0; retry < 3; retry++) {
+        bmv080_handle = NULL; // Prevenir error 180 (NULLPTR) en el SDK de Bosch
+        rslt          = bmv080_open(&bmv080_handle, (bmv080_sercom_handle_t) i2c_dev_handle, bmv080_i2c_read_16bit,
+                                    bmv080_i2c_write_16bit, bmv080_delay_ms);
+        if (rslt == E_BMV080_OK) {
+            break;
+        }
+        ESP_LOGW(TAG, "bmv080_open NACK/Error %d. Retrying %d/3...", rslt, retry + 1);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
     if (rslt != E_BMV080_OK) {
-        ESP_LOGE(TAG, "Error bmv080_open: %d", rslt);
+        ESP_LOGE(TAG, "Error bmv080_open FATAL: %d", rslt);
         return rslt;
     }
 
@@ -122,16 +175,24 @@ bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle)
     return E_BMV080_OK;
 }
 
-bmv080_status_code_t bmv080_wrapper_read_pm25(float *pm2_5) {
+int bmv080_wrapper_read_pm25(float *pm25_out) {
     if (!bmv080_handle)
-        return E_BMV080_ERROR_NULLPTR;
+        return -1;
 
     // Ejecutar el handler de interrupción manual (polling state machine)
     bmv080_status_code_t rslt = bmv080_serve_interrupt(bmv080_handle, bmv080_data_ready_callback, NULL);
 
-    if (rslt == E_BMV080_OK && pm2_5 != NULL) {
-        *pm2_5 = last_pm25;
-    }
+    if (rslt == E_BMV080_OK && pm25_out)
+        *pm25_out = last_pm25;
 
-    return rslt;
+    return (rslt == E_BMV080_OK) ? 0 : -1;
+}
+
+void bmv080_wrapper_deinit(void) {
+    if (bmv080_handle) {
+        bmv080_stop_measurement(bmv080_handle);
+        bmv080_close(&bmv080_handle);
+        bmv080_handle = NULL;
+        ESP_LOGI(TAG, "BMV080 measurement stopped and handle closed.");
+    }
 }

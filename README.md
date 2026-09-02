@@ -69,7 +69,9 @@ stateDiagram-v2
 
 Este repositorio implementa tácticas críticas para hardware desplegado en campo:
 1. **Bit-Banging Latch-Up Recovery:** Previo a montar el periférico hardware de I2C, el sistema inyecta 9 pulsos de reloj (SCL) manuales. Esto destraba esclavos que se hayan quedado "colgados" tirando de la línea SDA a tierra tras una caída abrupta de voltaje.
-2. **SRAM Profunda (`RTC_DATA_ATTR`):** Se evita reinicializar térmica y lógicamente el BME688. Los datos de calibración de fábrica se leen una vez y sobreviven al *Deep Sleep*.
+2. **SRAM Profunda (`RTC_DATA_ATTR`):** Se evita reinicializar térmica y lógicamente el BME688. Los datos de calibración de fábrica y el estado de la librería BSEC 3.0 sobreviven al *Deep Sleep*. Además, las direcciones I2C dinámicas detectadas por el escáner se preservan para evitar amnesia de red.
+3. **Aislamiento de Bus en Deep Sleep:** Cumplimiento de la regla de diseño mediante `gpio_hold_en()`. Antes de entrar en Deep Sleep, las líneas I2C se anclan físicamente a `HIGH`. Esto previene el *Clock-Glitching* y asegura que los sensores no bloqueen sus máquinas de estado internas por ruido eléctrico mientras el ESP32 duerme.
+4. **I2C General Call Reset:** Uso del comando broadcast de reset `0x00 -> 0x06` en el bus maestro para forzar un Soft Reset a nivel de silicio en los sensores Bosch, garantizando inicializaciones inmaculadas post-sueño profundo.
 
 ---
 
@@ -96,10 +98,18 @@ idf.py build flash monitor
 
 ---
 
+## 🔒 Buenas Prácticas de GitHub (Workspace Rules)
+Este proyecto sigue políticas estrictas de gobierno:
+- **Commits:** Uso exclusivo de **Conventional Commits** (`feat:`, `fix:`, `docs:`, `refactor:`).
+- **Control de Versiones:** `CHANGELOG.md` mantenido bajo estándar **Keep a Changelog** y **SemVer**.
+- **Pull Requests:** Código nuevo debe pasar linters, compilación sin warnings enrutas críticas y adjuntar pruebas unitarias.
+
+---
+
 ## 📝 Roadmap
 
 - [x] **Fase 1:** Arquitectura de Componentes (HAL BME688) e I2C Recovery.
 - [x] **Fase 2a:** Máquina de Estados de Doble Despertar (4.85s) y Aislamiento `gpio_hold_en`.
-- [ ] **Fase 2b:** Drivers SCD41, BMV080 y rutina de Auto-Discovery I2C (Base vs Pro Model).
-- [ ] **Fase 3:** Inteligencia Embebida BSEC 2.0 y TinyML para Clasificación Química.
+- [x] **Fase 2b:** Drivers SCD41, BMV080 y rutina de Auto-Discovery I2C (Base vs Pro Model).
+- [ ] **Fase 3:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
 - [ ] **Fase 4:** Gateway Criptográfico Ethernet y Telemetría Google Cloud Pub/Sub.

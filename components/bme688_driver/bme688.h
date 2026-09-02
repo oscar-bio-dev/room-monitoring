@@ -20,7 +20,7 @@
 #include "driver/i2c_master.h"
 
 // BME688 Default I2C Addresses
-#define BME688_I2C_ADDR_PRIMARY   0x76
+#define BME688_I2C_ADDR_PRIMARY 0x76
 #define BME688_I2C_ADDR_SECONDARY 0x77
 
 /**
@@ -52,11 +52,11 @@ typedef struct {
     uint8_t  par_h6;
     int8_t   par_h7;
 
-    int8_t   par_g1;
-    int16_t  par_g2;
-    int8_t   par_g3;
-    uint8_t  res_heat_range;
-    int8_t   res_heat_val;
+    int8_t  par_g1;
+    int16_t par_g2;
+    int8_t  par_g3;
+    uint8_t res_heat_range;
+    int8_t  res_heat_val;
 } bme688_calib_data_t;
 
 /**
@@ -64,13 +64,13 @@ typedef struct {
  * @note Ref: Datasheet BME688, Section 3.7 Data readout
  */
 typedef struct {
-    float temperature;   // in Celsius
-    float pressure;      // in hPa
-    float humidity;      // in %RH
-    float gas_res;       // in Ohms (Gas Resistance)
-    
-    uint8_t gas_valid;   // 1 if gas measurement was successful
-    uint8_t heat_stab;   // 1 if heater was stable during measurement
+    float temperature; // in Celsius
+    float pressure;    // in hPa
+    float humidity;    // in %RH
+    float gas_res;     // in Ohms (Gas Resistance)
+
+    uint8_t gas_valid; // 1 if gas measurement was successful
+    uint8_t heat_stab; // 1 if heater was stable during measurement
 } bme688_data_t;
 
 /**
@@ -78,8 +78,8 @@ typedef struct {
  */
 typedef struct {
     i2c_master_dev_handle_t i2c_dev;
-    bme688_calib_data_t calib;
-    double t_fine; // Intermediate variable used for compensation
+    bme688_calib_data_t     calib;
+    double                  t_fine; // Intermediate variable used for compensation
 } bme688_device_t;
 
 /**
@@ -93,13 +93,14 @@ typedef struct {
  * @param cached_calib Optional pointer to RTC cached calibration data (NULL to read from sensor).
  * @return esp_err_t ESP_OK on success.
  */
-esp_err_t bme688_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, bme688_device_t *dev, const bme688_calib_data_t *cached_calib);
+esp_err_t bme688_init(i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr, bme688_device_t *dev,
+                      const bme688_calib_data_t *cached_calib);
 
 /**
  * @brief Triggers a single "Forced Mode" measurement.
  * In forced mode, the sensor wakes up, takes one T/P/H/G measurement, and goes back to sleep.
  * @note Ref: Datasheet BME688, Section 3.4 Sensor modes (Forced mode)
- * 
+ *
  * @param dev Pointer to the initialized device context.
  * @return esp_err_t ESP_OK on success.
  */
@@ -109,7 +110,7 @@ esp_err_t bme688_trigger_forced_measurement(bme688_device_t *dev);
  * @brief Reads the resulting data from the sensor and applies compensation formulas.
  * Should be called after bme688_trigger_forced_measurement() and allowing enough time for conversion.
  * @note Ref: Datasheet BME688, Section 3.7 Data readout and compensation
- * 
+ *
  * @param dev Pointer to the initialized device context.
  * @param out_data Pointer to the struct where the data will be stored.
  * @return esp_err_t ESP_OK on success.
