@@ -37,8 +37,8 @@ void power_manager_execute_sleep_cycle(void) {
         sleep_time         = MASTER_SLEEP_TIME_US;
 
         ESP_LOGI(TAG, "Cycle complete. Holding I2C pins HIGH and entering Master Sleep (5 min)...");
-
-        // Cumplimiento Regla 6: Aislar dominio reteniendo el estado de los pines I2C (HIGH)
+        esp_sleep_enable_timer_wakeup(300000000ULL); // 5 minutos = 300,000,000 microsegundos
+        esp_deep_sleep_start();
         gpio_set_level(I2C_MASTER_SDA_IO, 1);
         gpio_set_level(I2C_MASTER_SCL_IO, 1);
         gpio_hold_en(I2C_MASTER_SDA_IO);

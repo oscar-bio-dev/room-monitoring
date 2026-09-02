@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "esp_attr.h"
 #include <stdlib.h>
+#include <sys/time.h>
 
 static const char *TAG = "bme688_bsec";
 
@@ -27,6 +28,14 @@ static void *bsec_instance = NULL;
 // Wrapper simple del delay para BSEC en microsegundos
 static void bsec_delay_us(uint32_t period, void *intf_ptr) {
     bosch_hal_delay_us(period, intf_ptr);
+}
+
+// Wrapper para el temporizador, usa gettimeofday que sobrevive al Deep Sleep
+// cuando CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y está activado.
+static int64_t get_timestamp_us(void) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (int64_t) tv.tv_sec * 1000000LL + (int64_t) tv.tv_usec;
 }
 
 int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle) {
@@ -118,7 +127,7 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
 
     // Obtener la configuración que el algoritmo BSEC requiere que el sensor físico tenga para esta marca de tiempo
     // (timestamp)
-    int64_t             curr_time_ns = esp_timer_get_time() * 1000;
+    int64_t             curr_time_ns = get_timestamp_us() * 1000;
     bsec_bme_settings_t bme_settings;
 
     if (!bsec_instance)

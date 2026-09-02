@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Las operaciones de BME688 y BMV080 propagan fallos, validan argumentos y limitan transferencias del SDK BMV080.
 - Se retiró el controlador BMV080 simulado no integrado; el firmware usa exclusivamente el wrapper del SDK oficial.
 
+### Fixed
+- **Amnesia de Tiempo (BSEC 3.0):** Se reemplazó `esp_timer_get_time()` por un envoltorio de `gettimeofday()` anclado al temporizador RTC profundo (`CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y`) en el archivo maestro de configuración (`sdkconfig.defaults`). Esto resuelve la pérdida de precisión del BME688 al impedir que el tiempo se reinicie a cero tras un *Deep Sleep*, garantizando un calentamiento y calibración de gas correcto a lo largo de los días.
+
 ## [0.4.0] - 2026-09-01
 ### Added
 - Integración completa de sensores **SCD41** (CO2) y **BMV080** (PM2.5).
