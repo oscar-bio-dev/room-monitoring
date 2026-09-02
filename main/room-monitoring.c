@@ -193,10 +193,10 @@ static void sensor_orchestration_task(void *pvParameters) {
 
             // 2. Leer BMV080
             if (is_pro_model) {
-                float pm25     = 0;
-                int   bmv_rslt = bmv080_wrapper_read_pm25(&pm25);
+                float pm1 = 0, pm25 = 0, pm10 = 0;
+                int   bmv_rslt = bmv080_wrapper_read_data(&pm1, &pm25, &pm10);
                 if (bmv_rslt == 0) {
-                    ESP_LOGI(TAG, "BMV080  -> PM2.5: %.2f ug/m3", pm25);
+                    ESP_LOGI(TAG, "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3", pm1, pm25, pm10);
                 } else {
                     ESP_LOGE(TAG, "BMV080  -> Error leyendo datos: código %d", bmv_rslt);
                 }

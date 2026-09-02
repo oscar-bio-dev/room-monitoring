@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Added
 - Validación CRC-8 de todas las palabras de medición SCD41 y reintentos limitados para sus operaciones I2C.
+- Soporte completo para métricas PM1.0 y PM10.0 extraídas desde la librería nativa del sensor BMV080, además del PM2.5.
 - Métricas de diagnóstico de despertar, reinicio, heap y margen mínimo de stack.
 
 ### Changed

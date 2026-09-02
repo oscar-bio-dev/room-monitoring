@@ -10,7 +10,9 @@ static const char *TAG = "bmv080_wrapper";
 static bmv080_handle_t bmv080_handle = NULL;
 // Handle del Bus I2C de ESP-IDF (cacheado para evadir bugs de contexto del SDK)
 static i2c_master_dev_handle_t s_bmv080_i2c_dev = NULL;
+static float                   last_pm1         = 0.0f;
 static float                   last_pm25        = 0.0f;
+static float                   last_pm10        = 0.0f;
 
 // Tiempo máximo de espera para transacciones I2C
 // Durante la descarga de firmware, el sensor hace clock-stretching para grabar en memoria.
@@ -139,8 +141,10 @@ static int8_t bmv080_i2c_write_16bit(bmv080_sercom_handle_t handle, uint16_t hea
 static void bmv080_data_ready_callback(bmv080_output_t bmv080_output, void *callback_parameters) {
     (void) callback_parameters;
     if (!bmv080_output.is_obstructed) {
+        last_pm1  = bmv080_output.pm1_mass_concentration;
         last_pm25 = bmv080_output.pm2_5_mass_concentration;
-        ESP_LOGI(TAG, "Láser BMV080: PM2.5 = %.2f ug/m3", last_pm25);
+        last_pm10 = bmv080_output.pm10_mass_concentration;
+        ESP_LOGI(TAG, "Láser BMV080: PM1=%.2f | PM2.5=%.2f | PM10=%.2f (ug/m3)", last_pm1, last_pm25, last_pm10);
     } else {
         ESP_LOGW(TAG, "Láser BMV080: Sensor obstruido o sucio");
     }
@@ -210,15 +214,22 @@ bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle)
     return E_BMV080_OK;
 }
 
-int bmv080_wrapper_read_pm25(float *pm25_out) {
-    if (!bmv080_handle || !pm25_out)
+int bmv080_wrapper_read_data(float *pm1_out, float *pm25_out, float *pm10_out) {
+    if (!bmv080_handle) {
         return -1;
+    }
 
     // Ejecutar el handler de interrupción manual (polling state machine)
     bmv080_status_code_t rslt = bmv080_serve_interrupt(bmv080_handle, bmv080_data_ready_callback, NULL);
 
-    if (rslt == E_BMV080_OK)
-        *pm25_out = last_pm25;
+    if (rslt == E_BMV080_OK) {
+        if (pm1_out)
+            *pm1_out = last_pm1;
+        if (pm25_out)
+            *pm25_out = last_pm25;
+        if (pm10_out)
+            *pm10_out = last_pm10;
+    }
 
     return (rslt == E_BMV080_OK) ? 0 : -1;
 }
