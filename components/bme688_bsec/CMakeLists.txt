@@ -1,7 +1,7 @@
 idf_component_register(
     SRC_DIRS "src"
     INCLUDE_DIRS "include"
-    REQUIRES "bosch_hal" "esp_timer"
+    REQUIRES "bosch_hal" "esp_timer" "rv1805_rtc" "power_manager"
 )
 
 # Enlazar la librería estática precompilada del algoritmo BSEC 2.0

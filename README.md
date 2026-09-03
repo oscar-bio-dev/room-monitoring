@@ -73,7 +73,8 @@ Este repositorio implementa tácticas críticas para hardware desplegado en camp
 3. **Aislamiento de Bus en Deep Sleep:** Cumplimiento de la regla de diseño mediante `gpio_hold_en()`. Antes de entrar en Deep Sleep, las líneas I2C se anclan físicamente a `HIGH`. Esto previene el *Clock-Glitching* y asegura que los sensores no bloqueen sus máquinas de estado internas por ruido eléctrico mientras el ESP32 duerme.
 4. **I2C General Call Reset:** Uso del comando broadcast de reset `0x00 -> 0x06` en el bus maestro para forzar un Soft Reset a nivel de silicio en los sensores Bosch, garantizando inicializaciones inmaculadas post-sueño profundo.
 7. **Integridad de mediciones:** Las tres palabras de la trama SCD41 se validan mediante CRC-8 antes de convertirlas a CO₂, temperatura y humedad. Las operaciones SCD41 se reintentan hasta tres veces y los fallos de inicialización de cada sensor deshabilitan únicamente esa medición.
-8. **Sincronización de Tiempo Real (RTC Timer):** Para el algoritmo BSEC 3.0 de Bosch, el tiempo de encendido (uptime) tradicional genera un bug de "amnesia temporal" al reiniciarse a 0 tras cada Deep Sleep. Se solucionó habilitando `CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y` para proveer a BSEC un `gettimeofday()` continuo y anclado al hardware que sobrevive a los ciclos de sueño profundo.
+8. **Sincronización de Tiempo Real (RTC Híbrido RV-1805):** Para el algoritmo BSEC 3.0, el tiempo de encendido (uptime) tradicional genera amnesia al reiniciarse a 0 tras cada Deep Sleep. Se implementó una sincronización maestra en Cold Boot contra un chip de hardware RV-1805. El resto del ciclo confía en el reloj interno `gettimeofday()` anclado al temporizador RTC profundo (`CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y`), logrando control de tiempo milimétrico sin penalizar el bus I2C ni consumir batería.
+9. **Anticolisión I2C (Clock-Stretching):** Implementación de retardos tácticos mecánicos estables entre la excitación del escáner láser BMV080 (250ms), el disparo del sensor NDIR SCD41 (50ms) y la ráfaga de datos del BME688. Además, el láser BMV080 se sondeó mediante *fast-polling* (100ms) durante el calentamiento y rutinas de purgado (15-buffer flush) para evitar fallos catastróficos por desbordamiento de su FIFO interno y bloqueos de bus (`I2C software timeout`).
 ## 📊 Diagnóstico en campo
 
 En cada ciclo de recolección, el firmware registra los motivos de despertar y reinicio, heap libre y el mínimo de stack disponible de la tarea de sensores. El intervalo de 4,85 segundos usa *light sleep* para conservar el contexto I²C y de FreeRTOS, mientras que el ciclo maestro usa *deep sleep*. Estos datos permiten detectar regresiones de consumo de memoria o reinicios inesperados sin exponer datos sensibles.
@@ -117,6 +118,6 @@ Este proyecto sigue políticas estrictas de gobierno:
 
 - [x] **Fase 1:** Arquitectura de Componentes (HAL BME688) e I2C Recovery.
 - [x] **Fase 2a:** Máquina de Estados de Doble Despertar (4.85s) y Aislamiento `gpio_hold_en`.
-- [x] **Fase 2b:** Drivers SCD41, BMV080 y rutina de Auto-Discovery I2C (Base vs Pro Model).
+- [x] **Fase 2b:** Integración Total de SCD41, BMV080, RTC Hardware Híbrido (RV-1805) y estabilización de bus I2C.
 - [ ] **Fase 3:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
-- [ ] **Fase 4:** Gateway Criptográfico Ethernet y Telemetría Google Cloud Pub/Sub.
+- [ ] **Fase 4:** Caja Negra MicroSD y Gateway Criptográfico Ethernet (Telemetría).

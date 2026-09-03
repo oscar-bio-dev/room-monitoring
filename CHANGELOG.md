@@ -6,7 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-09-03
 ### Added
+- **RTC Híbrido Zero-CPU:** Sincronización transparente entre el reloj de hardware Qwiic RV-1805 (Cold Boot) y el reloj interno `gettimeofday()` a través de los ciclos de Deep Sleep.
 - Validación CRC-8 de todas las palabras de medición SCD41 y reintentos limitados para sus operaciones I2C.
 - Soporte completo para métricas PM1.0 y PM10.0 extraídas desde la librería nativa del sensor BMV080, además del PM2.5.
 - Métricas de diagnóstico de despertar, reinicio, heap y margen mínimo de stack.
@@ -17,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Se retiró el controlador BMV080 simulado no integrado; el firmware usa exclusivamente el wrapper del SDK oficial.
 
 ### Fixed
-- **Amnesia de Tiempo (BSEC 3.0):** Se reemplazó `esp_timer_get_time()` por un envoltorio de `gettimeofday()` anclado al temporizador RTC profundo (`CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y`) en el archivo maestro de configuración (`sdkconfig.defaults`). Esto resuelve la pérdida de precisión del BME688 al impedir que el tiempo se reinicie a cero tras un *Deep Sleep*, garantizando un calentamiento y calibración de gas correcto a lo largo de los días.
+- **Colisión de Bus I2C (Software Timeout):** Se resolvieron las caídas del bus compartidas entre BME688, SCD41 y BMV080 agregando un tiempo mecánico de estabilización (250ms tras arranque del láser y 50ms post-disparo de CO2) evitando fallos de Clock-Stretching.
+- **Desbordamiento FIFO (BMV080):** Corrección drástica del error frecuente de `Sensor obstruido o sucio`. Se incrementó el sondeo de 1000ms a 100ms durante el calentamiento de 15s y se inyectó una rutina de purgado de 15 lecturas tras despertar del Micro-Sleep.
+- **Amnesia de Tiempo (BSEC 3.0):** Se integró exitosamente `CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y` junto con la inicialización RTC RV-1805, proveyendo un uptime irrompible para los algoritmos del BME688.
 
 ## [0.4.0] - 2026-09-01
 ### Added

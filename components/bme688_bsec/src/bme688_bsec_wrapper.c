@@ -4,23 +4,26 @@
 #include "bsec_datatypes.h"
 #include "bosch_hal.h"
 #include "esp_log.h"
+#include <sys/time.h>
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_attr.h"
 #include <stdlib.h>
-#include <sys/time.h>
+#include "rv1805_wrapper.h"
+#include "power_manager.h"
 
 static const char *TAG = "bme688_bsec";
 
 RTC_DATA_ATTR static uint8_t rtc_bsec_state[BSEC_MAX_STATE_BLOB_SIZE];
 RTC_DATA_ATTR static bool    rtc_bsec_state_valid = false;
 
-static struct bme68x_dev bme_dev;
-static float             current_iaq          = 0.0f;
-static uint8_t           current_iaq_accuracy = 0;
-static float             current_temp         = 0.0f;
-static float             current_hum          = 0.0f;
+static struct bme68x_dev       bme_dev;
+static i2c_master_dev_handle_t rtc_dev;
+static float                   current_iaq          = 0.0f;
+static uint8_t                 current_iaq_accuracy = 0;
+static float                   current_temp         = 0.0f;
+static float                   current_hum          = 0.0f;
 
 // Instancia global del BSEC 3.0
 static void *bsec_instance = NULL;
@@ -30,16 +33,10 @@ static void bsec_delay_us(uint32_t period, void *intf_ptr) {
     bosch_hal_delay_us(period, intf_ptr);
 }
 
-// Wrapper para el temporizador, usa gettimeofday que sobrevive al Deep Sleep
-// cuando CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y está activado.
-static int64_t get_timestamp_us(void) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (int64_t) tv.tv_sec * 1000000LL + (int64_t) tv.tv_usec;
-}
-
-int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle) {
+int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_handle_t rv_dev_handle) {
     int8_t rslt = BME68X_OK;
+
+    rtc_dev = rv_dev_handle;
 
     // 1. Configurar HAL nativo en el struct del BME68x
     bme_dev.read     = bosch_hal_i2c_read;
@@ -68,7 +65,7 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle) {
     }
 
     bsec_library_return_t bsec_status = bsec_init(bsec_instance);
-    if (bsec_status != BSEC_OK) {
+    if (bsec_status < BSEC_OK) {
         ESP_LOGE(TAG, "Error inicializando BSEC 3.0: %d", bsec_status);
         free(bsec_instance);
         bsec_instance = NULL;
@@ -87,25 +84,29 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle) {
         }
     }
 
+    // Determinar la tasa de muestreo según el modo actual
+    float sample_rate = power_manager_is_calibration_mode() ? BSEC_SAMPLE_RATE_LP : BSEC_SAMPLE_RATE_ULP;
+    ESP_LOGI(TAG, "BSEC configuring with sample rate: %f", sample_rate);
+
     // 3. Suscripciones BSEC (Las salidas que queremos que el algoritmo calcule)
     bsec_sensor_configuration_t requested_virtual_sensors[4];
     uint8_t                     n_requested_virtual_sensors = 4;
 
     // IAQ (Índice Calidad del Aire)
     requested_virtual_sensors[0].sensor_id   = BSEC_OUTPUT_IAQ;
-    requested_virtual_sensors[0].sample_rate = BSEC_SAMPLE_RATE_ULP; // Ultra Low Power (300s)
+    requested_virtual_sensors[0].sample_rate = sample_rate;
 
     // Temperatura compensada
     requested_virtual_sensors[1].sensor_id   = BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_TEMPERATURE;
-    requested_virtual_sensors[1].sample_rate = BSEC_SAMPLE_RATE_ULP;
+    requested_virtual_sensors[1].sample_rate = sample_rate;
 
     // Humedad compensada
     requested_virtual_sensors[2].sensor_id   = BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY;
-    requested_virtual_sensors[2].sample_rate = BSEC_SAMPLE_RATE_ULP;
+    requested_virtual_sensors[2].sample_rate = sample_rate;
 
     // Gas puro (resistencia) opcional
     requested_virtual_sensors[3].sensor_id   = BSEC_OUTPUT_RAW_GAS;
-    requested_virtual_sensors[3].sample_rate = BSEC_SAMPLE_RATE_ULP;
+    requested_virtual_sensors[3].sample_rate = sample_rate;
 
     bsec_sensor_configuration_t required_sensor_settings[BSEC_MAX_PHYSICAL_SENSOR];
     uint8_t                     n_required_sensor_settings = BSEC_MAX_PHYSICAL_SENSOR;
@@ -113,9 +114,13 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle) {
     bsec_status = bsec_update_subscription(bsec_instance, requested_virtual_sensors, n_requested_virtual_sensors,
                                            required_sensor_settings, &n_required_sensor_settings);
 
-    if (bsec_status != BSEC_OK) {
+    if (bsec_status < BSEC_OK) {
         ESP_LOGE(TAG, "Suscripción BSEC fallida: %d", bsec_status);
         return -1;
+    }
+
+    if (bsec_status > BSEC_OK) {
+        ESP_LOGW(TAG, "Suscripción BSEC warning/info: %d", bsec_status);
     }
 
     ESP_LOGI(TAG, "BSEC 3.0 suscripciones aceptadas con éxito");
@@ -126,15 +131,18 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
     bsec_library_return_t bsec_status;
 
     // Obtener la configuración que el algoritmo BSEC requiere que el sensor físico tenga para esta marca de tiempo
-    // (timestamp)
-    int64_t             curr_time_ns = get_timestamp_us() * 1000;
+    // (timestamp) proveniente del RTC interno del ESP32 en nanosegundos
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    int64_t curr_time_ns = ((int64_t) tv.tv_sec * 1000000000LL) + ((int64_t) tv.tv_usec * 1000LL);
+
     bsec_bme_settings_t bme_settings;
 
     if (!bsec_instance)
         return -1;
 
     bsec_status = bsec_sensor_control(bsec_instance, curr_time_ns, &bme_settings);
-    if (bsec_status != BSEC_OK)
+    if (bsec_status < BSEC_OK)
         return -1;
 
     // Si el algoritmo solicita que midamos...

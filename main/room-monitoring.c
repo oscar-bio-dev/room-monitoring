@@ -16,11 +16,14 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_log.h"
+#include <sys/time.h>
+
+#include "i2c_bus.h"
 #include "driver/gpio.h"
 #include "esp_attr.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
+#include "esp_log.h"
 
 // Componentes modulares
 #include "i2c_bus.h"
@@ -28,6 +31,7 @@
 #include "bme688_bsec_wrapper.h"
 #include "scd41.h"
 #include "bmv080_wrapper.h"
+#include "rv1805_wrapper.h"
 
 static const char *TAG = "app_main";
 
@@ -41,6 +45,7 @@ RTC_DATA_ATTR uint8_t dynamic_bmv_addr = 0x54;
 static i2c_master_dev_handle_t bme688_dev = NULL;
 static i2c_master_dev_handle_t scd41_dev  = NULL;
 static i2c_master_dev_handle_t bmv080_dev = NULL;
+static i2c_master_dev_handle_t rv1805_dev = NULL;
 
 static esp_err_t retry_scd41_trigger(void) {
     esp_err_t err = ESP_FAIL;
@@ -136,11 +141,32 @@ static void sensor_orchestration_task(void *pvParameters) {
         }
     }
 
+    // RTC Hardware (RV-1805) persistente
+    err = rv1805_wrapper_init(bus_handle, &rv1805_dev);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize RV1805 RTC! Timekeeping will fail.");
+    } else {
+        // [RTC SYNC] Solo sincronizamos el reloj interno del ESP32 en Cold Boot
+        if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) {
+            int64_t rv_time = 0;
+            if (rv1805_get_time_ns(rv1805_dev, &rv_time) == ESP_OK) {
+                struct timeval tv;
+                tv.tv_sec  = rv_time / 1000000000ULL;
+                tv.tv_usec = (rv_time % 1000000000ULL) / 1000;
+                settimeofday(&tv, NULL);
+                ESP_LOGI(TAG, "ESP32 POSIX Time synchronized from RV-1805 Hardware RTC.");
+            }
+        }
+    }
+
     // MÁQUINA DE ESTADOS (Micro-Sleep / Master-Sleep)
+    static RTC_DATA_ATTR uint32_t calib_cycles = 0;
 
     if (is_pro_model) {
         if (bmv080_wrapper_init(bmv080_dev) == E_BMV080_OK) {
             ESP_LOGI(TAG, "BMV080 Láser encendido (Continuous mode)");
+            vTaskDelay(
+                pdMS_TO_TICKS(250)); // Permitir que el BMV080 estabilice y libere el bus I2C tras su inicialización
         } else {
             ESP_LOGE(TAG, "BMV080 initialization failed; disabling particulate measurements");
             is_pro_model = false;
@@ -149,7 +175,7 @@ static void sensor_orchestration_task(void *pvParameters) {
 
     bool bme_initialized = false;
     for (uint8_t attempt = 1; attempt <= 3 && !bme_initialized; attempt++) {
-        bme_initialized = (bme688_bsec_init(bme688_dev) == 0);
+        bme_initialized = (bme688_bsec_init(bme688_dev, rv1805_dev) == 0);
         if (!bme_initialized) {
             ESP_LOGW(TAG, "BME688 initialization failed, attempt %u/3", attempt);
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -165,10 +191,27 @@ static void sensor_orchestration_task(void *pvParameters) {
         if (state == PM_STATE_WAKE_A) {
             ESP_LOGI(TAG, "=== WAKE A: Simultaneous Trigger ===");
 
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            ESP_LOGI(TAG, "System Time -> Timestamp: %lu segundos desde el año 2000 (Internal RTC)",
+                     (unsigned long) tv.tv_sec);
+
+            // Calentar BMV080 en Modo Normal para evitar lecturas 0.0 sin desbordar el bus I2C
+            // Polling cada 100ms (150 iteraciones = 15s) ya que 1000ms causaba overflow en el FIFO
+            if (is_pro_model && !power_manager_is_calibration_mode()) {
+                ESP_LOGI(TAG, "BMV080: Calentando láser (15s) y limpiando buffer (100ms poll)...");
+                for (int i = 0; i < 150; i++) {
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    bmv080_wrapper_read_data(NULL, NULL, NULL);
+                }
+            }
+
             // 1. Trigger SCD41 (Lento: tarda 5 segundos en procesar)
             if (retry_scd41_trigger() != ESP_OK) {
                 ESP_LOGE(TAG, "SCD41 trigger failed after retries");
             }
+
+            vTaskDelay(pdMS_TO_TICKS(50)); // Respiro para el bus I2C antes de configurar BME688
 
             // 2. Procesar BME688 con BSEC 3.0 (IAQ)
             if (bme_initialized) {
@@ -194,11 +237,17 @@ static void sensor_orchestration_task(void *pvParameters) {
             // 2. Leer BMV080
             if (is_pro_model) {
                 float pm1 = 0, pm25 = 0, pm10 = 0;
-                int   bmv_rslt = bmv080_wrapper_read_data(&pm1, &pm25, &pm10);
-                if (bmv_rslt == 0) {
+
+                // Purgar la cola de eventos acumulados durante el Micro-Sleep de 4.85s
+                for (int i = 0; i < 15; i++) {
+                    bmv080_wrapper_read_data(NULL, NULL, NULL);
+                }
+
+                int bmv_rslt = bmv080_wrapper_read_data(&pm1, &pm25, &pm10);
+                if (bmv_rslt == 0 && (pm1 > 0 || pm25 > 0)) {
                     ESP_LOGI(TAG, "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3", pm1, pm25, pm10);
                 } else {
-                    ESP_LOGE(TAG, "BMV080  -> Error leyendo datos: código %d", bmv_rslt);
+                    ESP_LOGW(TAG, "BMV080  -> Sin datos válidos o error (%d)", bmv_rslt);
                 }
                 bmv080_wrapper_deinit(); // AHORRO DE BATERÍA
             }
@@ -209,6 +258,16 @@ static void sensor_orchestration_task(void *pvParameters) {
             ESP_LOGI(TAG, "Runtime health: free heap=%u bytes, task stack minimum=%u bytes",
                      (unsigned int) esp_get_free_heap_size(),
                      (unsigned int) (uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
+
+            if (power_manager_is_calibration_mode()) {
+                calib_cycles++;
+                if (calib_cycles >= 20) { // 20 * 3s = 60s
+                    ESP_LOGI(TAG, "Calibration complete (20 cycles). Switching to Normal Mode (5 mins sleep).");
+                    power_manager_set_calibration_mode(false);
+                } else {
+                    ESP_LOGI(TAG, "Calibration mode: %lu/20 cycles completed.", (unsigned long) calib_cycles);
+                }
+            }
         }
 
         // Ejecutar política estricta de energía y delegar a la FSM
