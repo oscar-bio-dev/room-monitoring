@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-03
+### Added
+- **Protobuf (Nanopb):** Serialización binaria estricta (`telemetry.proto`) para todos los sensores ambientales, diagnósticos de ciclos y timestamp sin fragmentación del heap.
+- **Red ESP-NOW Asíncrona:** Integración de la radio Wi-Fi en modo STA con confirmaciones explícitas de paquetes (ACK) contra la MAC del Gateway.
+- **Caja Negra (Store-and-Forward):** Mecanismo de persistencia offline usando la MicroSD (bus VSPI). Solo se monta FATFS *on-demand* ante fallos de ACK, aislando eléctricamente los pines de la tarjeta al finalizar para prevenir dreno de batería.
+- **Recuperación Anti Brown-out:** Sistema dinámico de purgado del historial (máximo 15 registros por despertar) al detectar que el Gateway está online, para evitar caídas de tensión eléctrica en los momentos críticos de transmisión RF continua.
+
 ## [0.5.0] - 2026-09-03
 ### Added
 - **RTC Híbrido Zero-CPU:** Sincronización transparente entre el reloj de hardware Qwiic RV-1805 (Cold Boot) y el reloj interno `gettimeofday()` a través de los ciclos de Deep Sleep.

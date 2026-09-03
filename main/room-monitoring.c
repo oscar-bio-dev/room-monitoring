@@ -32,6 +32,11 @@
 #include "scd41.h"
 #include "bmv080_wrapper.h"
 #include "rv1805_wrapper.h"
+#include "network_manager.h"
+#include "storage_manager.h"
+#include "telemetry.pb.h"
+#include "pb_encode.h"
+#include <time.h>
 
 static const char *TAG = "app_main";
 
@@ -225,19 +230,21 @@ static void sensor_orchestration_task(void *pvParameters) {
         } else {
             ESP_LOGI(TAG, "=== WAKE B: Data Collection ===");
 
+            // Variables para telemetría
+            scd41_data_t scd41_data = {0};
+            float        pm1 = 0, pm25 = 0, pm10 = 0;
+
             // 1. Leer SCD41
-            scd41_data_t scd41_data;
             if (retry_scd41_read(&scd41_data) == ESP_OK) {
                 ESP_LOGI(TAG, "SCD41   -> CO2: %u ppm | Temp: %.2f C | Hum: %.2f %%", scd41_data.co2,
                          scd41_data.temperature, scd41_data.humidity);
             } else {
                 ESP_LOGE(TAG, "SCD41 measurement unavailable");
+                scd41_data.co2 = 0;
             }
 
             // 2. Leer BMV080
             if (is_pro_model) {
-                float pm1 = 0, pm25 = 0, pm10 = 0;
-
                 // Purgar la cola de eventos acumulados durante el Micro-Sleep de 4.85s
                 for (int i = 0; i < 15; i++) {
                     bmv080_wrapper_read_data(NULL, NULL, NULL);
@@ -268,6 +275,63 @@ static void sensor_orchestration_task(void *pvParameters) {
                     ESP_LOGI(TAG, "Calibration mode: %lu/20 cycles completed.", (unsigned long) calib_cycles);
                 }
             }
+
+            // 4. Empaquetado Protobuf y Transmisión ESP-NOW
+            EnvironmentalData data = EnvironmentalData_init_zero;
+            struct timeval    tv;
+            gettimeofday(&tv, NULL);
+            data.timestamp    = tv.tv_sec;
+            data.temperature  = rtc_temp;
+            data.humidity     = rtc_hum;
+            data.iaq          = rtc_iaq;
+            data.iaq_accuracy = rtc_acc;
+            data.co2_ppm      = scd41_data.co2; // será 0 si falló
+
+            if (is_pro_model) {
+                data.pm1_0  = pm1;
+                data.pm2_5  = pm25;
+                data.pm10_0 = pm10;
+            }
+            // data.battery_mv = ... (por implementar con ADC)
+            data.sleep_cycles = calib_cycles; // Usamos calib_cycles para diagnóstico
+
+            network_manager_init();
+            uint8_t      buffer[128];
+            pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+
+            if (pb_encode(&stream, EnvironmentalData_fields, &data)) {
+                if (network_manager_send(buffer, stream.bytes_written) == ESP_OK) {
+                    ESP_LOGI(TAG, "Telemetría enviada por ESP-NOW. Verificando Caja Negra...");
+
+                    EnvironmentalData batch[15];
+                    size_t            count = 0;
+                    if (storage_manager_get_offline_batch(batch, 15, &count) == ESP_OK && count > 0) {
+                        ESP_LOGI(TAG, "Enviando %d registros offline (Store & Forward)...", count);
+                        size_t success_count = 0;
+                        for (size_t i = 0; i < count; i++) {
+                            pb_ostream_t off_stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+                            if (pb_encode(&off_stream, EnvironmentalData_fields, &batch[i])) {
+                                if (network_manager_send(buffer, off_stream.bytes_written) == ESP_OK) {
+                                    success_count++;
+                                } else {
+                                    ESP_LOGW(TAG, "Fallo al enviar lote offline (Gateway cayó durante la ráfaga)");
+                                    break;
+                                }
+                            }
+                        }
+                        if (success_count > 0) {
+                            storage_manager_clear_offline_batch(success_count);
+                            ESP_LOGI(TAG, "Limpiados %d registros enviados de la Caja Negra", success_count);
+                        }
+                    }
+                } else {
+                    ESP_LOGW(TAG, "Fallo ESP-NOW (Gateway Inalcanzable). Guardando en Caja Negra...");
+                    storage_manager_save_offline(&data);
+                }
+            } else {
+                ESP_LOGE(TAG, "Error empaquetando Protobuf");
+            }
+            network_manager_deinit();
         }
 
         // Ejecutar política estricta de energía y delegar a la FSM

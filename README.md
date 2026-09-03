@@ -75,6 +75,7 @@ Este repositorio implementa tácticas críticas para hardware desplegado en camp
 7. **Integridad de mediciones:** Las tres palabras de la trama SCD41 se validan mediante CRC-8 antes de convertirlas a CO₂, temperatura y humedad. Las operaciones SCD41 se reintentan hasta tres veces y los fallos de inicialización de cada sensor deshabilitan únicamente esa medición.
 8. **Sincronización de Tiempo Real (RTC Híbrido RV-1805):** Para el algoritmo BSEC 3.0, el tiempo de encendido (uptime) tradicional genera amnesia al reiniciarse a 0 tras cada Deep Sleep. Se implementó una sincronización maestra en Cold Boot contra un chip de hardware RV-1805. El resto del ciclo confía en el reloj interno `gettimeofday()` anclado al temporizador RTC profundo (`CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y`), logrando control de tiempo milimétrico sin penalizar el bus I2C ni consumir batería.
 9. **Anticolisión I2C (Clock-Stretching):** Implementación de retardos tácticos mecánicos estables entre la excitación del escáner láser BMV080 (250ms), el disparo del sensor NDIR SCD41 (50ms) y la ráfaga de datos del BME688. Además, el láser BMV080 se sondeó mediante *fast-polling* (100ms) durante el calentamiento y rutinas de purgado (15-buffer flush) para evitar fallos catastróficos por desbordamiento de su FIFO interno y bloqueos de bus (`I2C software timeout`).
+10. **Telemetría ESP-NOW y Caja Negra (Store-and-Forward):** La transmisión de datos opera vía ESP-NOW (*peer-to-peer*) hacia el Gateway para minimizar el tiempo de radio encendida. Si el Gateway no emite confirmación (ACK), el sistema inicializa *On-Demand* el lector MicroSD (bus VSPI), empaqueta las lecturas con el estándar industrial **Nanopb** (Protobuf), las anexa a un archivo binario y apaga el bus SPI por completo. Al recuperar conexión, la "Caja Negra" se vacía dinámicamente enviando lotes máximos de 15 registros para prevenir caídas de tensión (Brown-out) por sobreesfuerzo prolongado de la batería.
 ## 📊 Diagnóstico en campo
 
 En cada ciclo de recolección, el firmware registra los motivos de despertar y reinicio, heap libre y el mínimo de stack disponible de la tarea de sensores. El intervalo de 4,85 segundos usa *light sleep* para conservar el contexto I²C y de FreeRTOS, mientras que el ciclo maestro usa *deep sleep*. Estos datos permiten detectar regresiones de consumo de memoria o reinicios inesperados sin exponer datos sensibles.
@@ -119,5 +120,6 @@ Este proyecto sigue políticas estrictas de gobierno:
 - [x] **Fase 1:** Arquitectura de Componentes (HAL BME688) e I2C Recovery.
 - [x] **Fase 2a:** Máquina de Estados de Doble Despertar (4.85s) y Aislamiento `gpio_hold_en`.
 - [x] **Fase 2b:** Integración Total de SCD41, BMV080, RTC Hardware Híbrido (RV-1805) y estabilización de bus I2C.
-- [ ] **Fase 3:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
-- [ ] **Fase 4:** Caja Negra MicroSD y Gateway Criptográfico Ethernet (Telemetría).
+- [x] **Fase 3:** Telemetría Resiliente ESP-NOW y "Caja Negra" Store-and-Forward (MicroSD SPI) con Nanopb.
+- [ ] **Fase 4:** Gateway Criptográfico Edge (ESP32-P4) con conectividad a Google Cloud.
+- [ ] **Fase 5:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
