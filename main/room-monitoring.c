@@ -280,20 +280,39 @@ static void sensor_orchestration_task(void *pvParameters) {
             EnvironmentalData data = EnvironmentalData_init_zero;
             struct timeval    tv;
             gettimeofday(&tv, NULL);
-            data.timestamp    = tv.tv_sec;
-            data.temperature  = rtc_temp;
-            data.humidity     = rtc_hum;
-            data.iaq          = rtc_iaq;
-            data.iaq_accuracy = rtc_acc;
-            data.co2_ppm      = scd41_data.co2; // será 0 si falló
+            data.timestamp     = tv.tv_sec;
+            data.has_timestamp = true;
 
-            if (is_pro_model) {
-                data.pm1_0  = pm1;
-                data.pm2_5  = pm25;
-                data.pm10_0 = pm10;
+            // BME688
+            data.temperature      = rtc_temp;
+            data.has_temperature  = true;
+            data.humidity         = rtc_hum;
+            data.has_humidity     = true;
+            data.iaq              = rtc_iaq;
+            data.has_iaq          = true;
+            data.iaq_accuracy     = rtc_acc;
+            data.has_iaq_accuracy = true;
+
+            // SCD41
+            if (scd41_data.co2 > 0) {
+                data.co2_ppm     = scd41_data.co2;
+                data.has_co2_ppm = true;
+            }
+
+            // BMV080
+            if (is_pro_model && (pm1 > 0 || pm25 > 0)) {
+                data.pm1_0      = pm1;
+                data.has_pm1_0  = true;
+                data.pm2_5      = pm25;
+                data.has_pm2_5  = true;
+                data.pm10_0     = pm10;
+                data.has_pm10_0 = true;
             }
             // data.battery_mv = ... (por implementar con ADC)
-            data.sleep_cycles = calib_cycles; // Usamos calib_cycles para diagnóstico
+
+            // Diagnóstico
+            data.sleep_cycles     = calib_cycles; // Usamos calib_cycles para diagnóstico
+            data.has_sleep_cycles = true;
 
             network_manager_init();
             uint8_t      buffer[128];
