@@ -3,6 +3,7 @@
 #include "esp_now.h"
 #include "esp_log.h"
 #include "esp_mac.h"
+#include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "sdkconfig.h"
@@ -49,6 +50,14 @@ void network_manager_init(void) {
     parse_mac_string(CONFIG_ESPNOW_GATEWAY_MAC, gateway_mac);
     ESP_LOGI(TAG, "Gateway MAC: %02X:%02X:%02X:%02X:%02X:%02X", gateway_mac[0], gateway_mac[1], gateway_mac[2],
              gateway_mac[3], gateway_mac[4], gateway_mac[5]);
+
+    /* Inicializar NVS (Requerido por esp_wifi_init para calibración PHY) */
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
