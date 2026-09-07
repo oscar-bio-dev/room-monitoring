@@ -24,6 +24,8 @@ static float                   current_iaq          = 0.0f;
 static uint8_t                 current_iaq_accuracy = 0;
 static float                   current_temp         = 0.0f;
 static float                   current_hum          = 0.0f;
+static float                   current_pressure     = 0.0f;
+static float                   current_gas_res      = 0.0f;
 
 // Instancia global del BSEC 3.0
 static void *bsec_instance = NULL;
@@ -89,8 +91,8 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_h
     ESP_LOGI(TAG, "BSEC configuring with sample rate: %f", sample_rate);
 
     // 3. Suscripciones BSEC (Las salidas que queremos que el algoritmo calcule)
-    bsec_sensor_configuration_t requested_virtual_sensors[4];
-    uint8_t                     n_requested_virtual_sensors = 4;
+    bsec_sensor_configuration_t requested_virtual_sensors[6];
+    uint8_t                     n_requested_virtual_sensors = 6;
 
     // IAQ (Índice Calidad del Aire)
     requested_virtual_sensors[0].sensor_id   = BSEC_OUTPUT_IAQ;
@@ -104,9 +106,17 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_h
     requested_virtual_sensors[2].sensor_id   = BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY;
     requested_virtual_sensors[2].sample_rate = sample_rate;
 
-    // Gas puro (resistencia) opcional
+    // Gas puro (resistencia) para telemetría ecológica
     requested_virtual_sensors[3].sensor_id   = BSEC_OUTPUT_RAW_GAS;
     requested_virtual_sensors[3].sample_rate = sample_rate;
+
+    // Presión barométrica (raw, no compensada)
+    requested_virtual_sensors[4].sensor_id   = BSEC_OUTPUT_RAW_PRESSURE;
+    requested_virtual_sensors[4].sample_rate = sample_rate;
+
+    // Temperatura raw (para diagnóstico)
+    requested_virtual_sensors[5].sensor_id   = BSEC_OUTPUT_RAW_TEMPERATURE;
+    requested_virtual_sensors[5].sample_rate = sample_rate;
 
     bsec_sensor_configuration_t required_sensor_settings[BSEC_MAX_PHYSICAL_SENSOR];
     uint8_t                     n_required_sensor_settings = BSEC_MAX_PHYSICAL_SENSOR;
@@ -127,7 +137,8 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_h
     return 0;
 }
 
-int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, float *humidity) {
+int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, float *humidity, float *pressure,
+                            float *gas_resistance) {
     bsec_library_return_t bsec_status;
 
     // Obtener la configuración que el algoritmo BSEC requiere que el sensor físico tenga para esta marca de tiempo
@@ -239,6 +250,12 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
                 if (outputs[i].sensor_id == BSEC_OUTPUT_SENSOR_HEAT_COMPENSATED_HUMIDITY) {
                     current_hum = outputs[i].signal;
                 }
+                if (outputs[i].sensor_id == BSEC_OUTPUT_RAW_PRESSURE) {
+                    current_pressure = outputs[i].signal / 100.0f; // Pa → hPa
+                }
+                if (outputs[i].sensor_id == BSEC_OUTPUT_RAW_GAS) {
+                    current_gas_res = outputs[i].signal;
+                }
             }
 
             // Save state for deep sleep persistence
@@ -262,6 +279,10 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
         *temperature = current_temp;
     if (humidity)
         *humidity = current_hum;
+    if (pressure)
+        *pressure = current_pressure;
+    if (gas_resistance)
+        *gas_resistance = current_gas_res;
 
     return 0;
 }

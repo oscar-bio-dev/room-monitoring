@@ -23,9 +23,12 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_h
  * @param accuracy Puntero para la precisión del estado del algoritmo (0-3)
  * @param temperature Puntero para la temperatura compensada (opcional)
  * @param humidity Puntero para la humedad compensada (opcional)
+ * @param pressure Puntero para la presión barométrica en hPa (opcional)
+ * @param gas_resistance Puntero para la resistencia del MOX en Ohms (opcional)
  * @return int8_t 0 (Éxito) o distinto de 0 (Error)
  */
-int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, float *humidity);
+int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, float *humidity, float *pressure,
+                            float *gas_resistance);
 
 #ifdef __cplusplus
 }

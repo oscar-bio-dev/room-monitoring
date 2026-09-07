@@ -41,10 +41,11 @@
 static const char *TAG = "app_main";
 
 // Estado del Auto-Discovery (Detectará si existe el BMV080)
-RTC_DATA_ATTR bool    is_pro_model     = false;
-RTC_DATA_ATTR bool    discovery_done   = false;
-RTC_DATA_ATTR uint8_t dynamic_bme_addr = 0x76;
-RTC_DATA_ATTR uint8_t dynamic_bmv_addr = 0x54;
+RTC_DATA_ATTR bool     is_pro_model     = false;
+RTC_DATA_ATTR bool     discovery_done   = false;
+RTC_DATA_ATTR uint8_t  dynamic_bme_addr = 0x76;
+RTC_DATA_ATTR uint8_t  dynamic_bmv_addr = 0x54;
+RTC_DATA_ATTR uint32_t node_sequence    = 0;
 
 // Handlers de sensores I2C
 static i2c_master_dev_handle_t bme688_dev = NULL;
@@ -117,6 +118,7 @@ static void sensor_orchestration_task(void *pvParameters) {
 
     // MÁQUINA DE ESTADOS (Micro-Sleep / Master-Sleep)
     static RTC_DATA_ATTR float   rtc_iaq = 0, rtc_temp = 0, rtc_hum = 0;
+    static RTC_DATA_ATTR float   rtc_pressure = 0, rtc_gas_res = 0;
     static RTC_DATA_ATTR uint8_t rtc_acc = 0;
 
     // 1. Adjuntar dispositivos al bus (persisten a través del Light Sleep)
@@ -220,7 +222,7 @@ static void sensor_orchestration_task(void *pvParameters) {
 
             // 2. Procesar BME688 con BSEC 3.0 (IAQ)
             if (bme_initialized) {
-                if (bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum) == 0) {
+                if (bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res) == 0) {
                     ESP_LOGI(TAG, "BME688 Procesado correctamente (Resultados guardados para WAKE_B)");
                 } else {
                     ESP_LOGE(TAG, "BME688 IAQ processing failed");
@@ -276,27 +278,41 @@ static void sensor_orchestration_task(void *pvParameters) {
                 }
             }
 
-            // 4. Empaquetado Protobuf y Transmisión ESP-NOW
-            EnvironmentalData data = EnvironmentalData_init_zero;
-            struct timeval    tv;
-            gettimeofday(&tv, NULL);
-            data.timestamp     = tv.tv_sec;
-            data.has_timestamp = true;
+            // 4. Empaquetado Protobuf (TelemetryPayload) y Transmisión ESP-NOW
+            TelemetryPayload data = TelemetryPayload_init_zero;
 
-            // BME688
-            data.temperature      = rtc_temp;
-            data.has_temperature  = true;
-            data.humidity         = rtc_hum;
-            data.has_humidity     = true;
-            data.iaq              = rtc_iaq;
-            data.has_iaq          = true;
-            data.iaq_accuracy     = rtc_acc;
-            data.has_iaq_accuracy = true;
+            // Versioning
+            data.protocol_version     = 1;
+            data.has_protocol_version = true;
+            data.schema_version       = 1;
+            data.has_schema_version   = true;
+
+            // Secuencia e Idempotencia
+            data.node_sequence     = node_sequence;
+            data.has_node_sequence = true;
+
+            // Timestamp (milisegundos desde epoch)
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            data.measured_at_ms     = ((uint64_t) tv.tv_sec * 1000ULL) + ((uint64_t) tv.tv_usec / 1000ULL);
+            data.has_measured_at_ms = true;
+
+            // BME688 / BSEC
+            data.temperature        = rtc_temp;
+            data.has_temperature    = true;
+            data.humidity           = rtc_hum;
+            data.has_humidity       = true;
+            data.pressure           = rtc_pressure;
+            data.has_pressure       = true;
+            data.gas_resistance     = rtc_gas_res;
+            data.has_gas_resistance = true;
+            data.iaq                = rtc_iaq;
+            data.has_iaq            = true;
 
             // SCD41
             if (scd41_data.co2 > 0) {
-                data.co2_ppm     = scd41_data.co2;
-                data.has_co2_ppm = true;
+                data.co2     = scd41_data.co2;
+                data.has_co2 = true;
             }
 
             // BMV080
@@ -308,28 +324,28 @@ static void sensor_orchestration_task(void *pvParameters) {
                 data.pm10_0     = pm10;
                 data.has_pm10_0 = true;
             }
-            // data.battery_mv = ... (por implementar con ADC)
 
             // Diagnóstico
-            data.sleep_cycles     = calib_cycles; // Usamos calib_cycles para diagnóstico
+            data.sleep_cycles     = calib_cycles;
             data.has_sleep_cycles = true;
+            // data.battery_mv = ... (por implementar con ADC)
 
             network_manager_init();
-            uint8_t      buffer[128];
+            uint8_t      buffer[256];
             pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
-            if (pb_encode(&stream, EnvironmentalData_fields, &data)) {
+            if (pb_encode(&stream, TelemetryPayload_fields, &data)) {
                 if (network_manager_send(buffer, stream.bytes_written) == ESP_OK) {
                     ESP_LOGI(TAG, "Telemetría enviada por ESP-NOW. Verificando Caja Negra...");
 
-                    EnvironmentalData batch[15];
-                    size_t            count = 0;
+                    TelemetryPayload batch[15];
+                    size_t           count = 0;
                     if (storage_manager_get_offline_batch(batch, 15, &count) == ESP_OK && count > 0) {
                         ESP_LOGI(TAG, "Enviando %d registros offline (Store & Forward)...", count);
                         size_t success_count = 0;
                         for (size_t i = 0; i < count; i++) {
                             pb_ostream_t off_stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
-                            if (pb_encode(&off_stream, EnvironmentalData_fields, &batch[i])) {
+                            if (pb_encode(&off_stream, TelemetryPayload_fields, &batch[i])) {
                                 if (network_manager_send(buffer, off_stream.bytes_written) == ESP_OK) {
                                     success_count++;
                                 } else {
@@ -351,6 +367,9 @@ static void sensor_orchestration_task(void *pvParameters) {
                 ESP_LOGE(TAG, "Error empaquetando Protobuf");
             }
             network_manager_deinit();
+
+            // Incrementar secuencia solo si se intentó transmitir
+            node_sequence++;
         }
 
         // Ejecutar política estricta de energía y delegar a la FSM

@@ -66,14 +66,14 @@ static void unmount_sd(void) {
     }
 }
 
-esp_err_t storage_manager_save_offline(const EnvironmentalData *data) {
+esp_err_t storage_manager_save_offline(const TelemetryPayload *data) {
     if (mount_sd() != ESP_OK)
         return ESP_FAIL;
 
     uint8_t      buffer[128];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
-    if (!pb_encode(&stream, EnvironmentalData_fields, data)) {
+    if (!pb_encode(&stream, TelemetryPayload_fields, data)) {
         ESP_LOGE(TAG, "Protobuf encoding failed: %s", PB_GET_ERROR(&stream));
         unmount_sd();
         return ESP_FAIL;
@@ -96,7 +96,7 @@ esp_err_t storage_manager_save_offline(const EnvironmentalData *data) {
     return ESP_OK;
 }
 
-esp_err_t storage_manager_get_offline_batch(EnvironmentalData *batch, size_t max_items, size_t *out_count) {
+esp_err_t storage_manager_get_offline_batch(TelemetryPayload *batch, size_t max_items, size_t *out_count) {
     *out_count = 0;
     if (mount_sd() != ESP_OK)
         return ESP_FAIL;
@@ -115,7 +115,7 @@ esp_err_t storage_manager_get_offline_batch(EnvironmentalData *batch, size_t max
         }
 
         pb_istream_t stream = pb_istream_from_buffer(buffer, size);
-        if (pb_decode(&stream, EnvironmentalData_fields, &batch[*out_count])) {
+        if (pb_decode(&stream, TelemetryPayload_fields, &batch[*out_count])) {
             (*out_count)++;
         }
     }

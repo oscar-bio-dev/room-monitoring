@@ -1,25 +1,47 @@
 syntax = "proto3";
 
-// Mensaje de telemetría del nodo ambiental
-message EnvironmentalData {
-    // Timestamp (POSIX epoch, segundos)
-    optional uint32 timestamp = 1;
+package telemetry;
 
-    // BME688
-    optional float temperature = 2;
-    optional float humidity = 3;
-    optional float iaq = 4;
-    optional uint32 iaq_accuracy = 5;
+// Subconjunto estricto del TelemetryPayload canónico del Gateway.
+// Los field numbers son SAGRADOS y MUST coincidir con el Mega-Esquema.
+// Los campos de identidad (3-5) y de ingestión (8) son inyectados por el Gateway.
+message TelemetryPayload {
+    // Versioning (el nodo los fija, el Gateway los valida)
+    optional uint32 protocol_version = 1;
+    optional uint32 schema_version = 2;
 
-    // SCD41
-    optional uint32 co2_ppm = 6;
+    // Identidad: OMITIDOS (inyectados por el Gateway C6)
+    // string event_id = 3;
+    // string gateway_id = 4;
+    // string device_id = 5;
 
-    // BMV080
-    optional float pm1_0 = 7;
-    optional float pm2_5 = 8;
-    optional float pm10_0 = 9;
+    // Secuencia del nodo (para detección de huecos)
+    optional uint32 node_sequence = 6;
 
-    // Diagnóstico
-    optional uint32 battery_mv = 10;
-    optional uint32 sleep_cycles = 11;
+    // Tiempo de medición (ms desde epoch, rellenado por el nodo vía RTC)
+    optional uint64 measured_at_ms = 7;
+
+    // Ingestión: OMITIDO (inyectado por el Gateway P4)
+    // uint64 ingested_at_ms = 8;
+
+    // === Ambiental y Calidad de Aire (BME688 / BSEC / SCD41) ===
+    optional float temperature = 9;       // Celsius (compensada por BSEC)
+    optional float humidity = 10;         // % RH (compensada por BSEC)
+    optional float pressure = 11;         // hPa (presión barométrica)
+    optional float gas_resistance = 12;   // Ohms (resistencia del MOX)
+    optional float iaq = 13;              // Index of Air Quality (0-500)
+    optional uint32 co2 = 14;             // ppm (SCD41 NDIR)
+
+    // === Partículas (BMV080 Láser) ===
+    optional float pm1_0 = 15;            // ug/m3
+    optional float pm2_5 = 16;            // ug/m3
+    optional float pm10_0 = 17;           // ug/m3
+
+    // === Agua y Suelo (futuro) ===
+    // optional float ph = 18;
+    // optional float dissolved_oxygen = 19;
+
+    // === Diagnósticos del Nodo ===
+    optional uint32 battery_mv = 20;      // Millivolts (ADC, futuro)
+    optional uint32 sleep_cycles = 21;    // Hardware wake count
 }

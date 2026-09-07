@@ -1,0 +1,44 @@
+menu "ESP-NOW Security Configuration"
+
+    config ESPNOW_CHANNEL
+        int "ESP-NOW Wi-Fi Channel"
+        default 1
+        range 1 14
+        help
+            Wi-Fi channel for ESP-NOW transmission. MUST match the channel
+            configured on the Gateway Companion C6 (edge-telemetry-gateway).
+
+    config ESPNOW_GATEWAY_MAC
+        string "Gateway Companion C6 MAC Address"
+        default "00:00:00:00:00:00"
+        help
+            MAC address of the ESP32-C6 Companion on the Gateway board.
+            Format: "AA:BB:CC:DD:EE:FF" (colon-separated hex).
+            Obtain from Gateway logs: "ESP-NOW Receiver Initialized. MAC: XX:XX:..."
+            MUST be set to the real MAC for encrypted communication.
+
+    config ESPNOW_PMK
+        string "ESP-NOW Primary Master Key (PMK)"
+        default "SetaeSense2026!!"
+        help
+            16-byte Primary Master Key for ESP-NOW encryption.
+            Must be identical on the Sensor Node and the Gateway Companion C6.
+            Change this before production deployment.
+
+    config ESPNOW_LMK
+        string "ESP-NOW Local Master Key (LMK)"
+        default "NodeGatewayKey!!"
+        help
+            16-byte Local Master Key for the peer-to-peer CCMP-128 session.
+            Must be identical on the Sensor Node and the Gateway Companion C6.
+            Change this before production deployment.
+
+    config ESPNOW_ENCRYPT
+        bool "Enable ESP-NOW Encryption"
+        default y
+        help
+            Enable CCMP-128 encryption for all ESP-NOW frames.
+            Requires a valid (non-broadcast) Gateway MAC address.
+            Disable only for initial lab testing without a Gateway.
+
+endmenu
