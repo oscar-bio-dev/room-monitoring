@@ -10,7 +10,7 @@ menu "ESP-NOW Security Configuration"
 
     config ESPNOW_GATEWAY_MAC
         string "Gateway Companion C6 MAC Address"
-        default "00:00:00:00:00:00"
+        default "B0:A6:04:9A:15:F8"
         help
             MAC address of the ESP32-C6 Companion on the Gateway board.
             Format: "AA:BB:CC:DD:EE:FF" (colon-separated hex).
@@ -19,7 +19,7 @@ menu "ESP-NOW Security Configuration"
 
     config ESPNOW_PMK
         string "ESP-NOW Primary Master Key (PMK)"
-        default "SetaeSense2026!!"
+        default "pmk1234567890123"
         help
             16-byte Primary Master Key for ESP-NOW encryption.
             Must be identical on the Sensor Node and the Gateway Companion C6.
@@ -27,7 +27,7 @@ menu "ESP-NOW Security Configuration"
 
     config ESPNOW_LMK
         string "ESP-NOW Local Master Key (LMK)"
-        default "NodeGatewayKey!!"
+        default "lmk1234567890123"
         help
             16-byte Local Master Key for the peer-to-peer CCMP-128 session.
             Must be identical on the Sensor Node and the Gateway Companion C6.
