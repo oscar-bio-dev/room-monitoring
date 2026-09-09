@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
+#include "esp_netif.h"
+#include "esp_event.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "sdkconfig.h"
@@ -58,6 +60,13 @@ void network_manager_init(void) {
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    /* Inicializar el stack TCP/IP y el event loop (requerido por esp_wifi_start para no lanzar errores) */
+    ESP_ERROR_CHECK(esp_netif_init());
+    esp_err_t event_ret = esp_event_loop_create_default();
+    if (event_ret != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(event_ret);
+    }
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
