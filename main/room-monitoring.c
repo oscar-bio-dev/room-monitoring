@@ -298,16 +298,38 @@ static void sensor_orchestration_task(void *pvParameters) {
             data.has_measured_at_ms = true;
 
             // BME688 / BSEC
-            data.temperature        = rtc_temp;
-            data.has_temperature    = true;
-            data.humidity           = rtc_hum;
-            data.has_humidity       = true;
-            data.pressure           = rtc_pressure;
-            data.has_pressure       = true;
-            data.gas_resistance     = rtc_gas_res;
-            data.has_gas_resistance = true;
-            data.iaq                = rtc_iaq;
-            data.has_iaq            = true;
+            if (rtc_temp > -40.0f && rtc_temp < 85.0f) {
+                data.temperature     = rtc_temp;
+                data.has_temperature = true;
+            } else {
+                data.has_temperature = false;
+            }
+
+            if (rtc_hum > 0.0f && rtc_hum <= 100.0f) {
+                data.humidity     = rtc_hum;
+                data.has_humidity = true;
+            } else {
+                data.has_humidity = false;
+            }
+
+            if (rtc_pressure > 300.0f) {
+                data.pressure     = rtc_pressure;
+                data.has_pressure = true;
+            } else {
+                data.has_pressure = false;
+                ESP_LOGW(TAG, "Presión ignorada (Valor anómalo: %.2f) - Previniendo Poison Pill en Backend",
+                         rtc_pressure);
+            }
+
+            if (rtc_gas_res > 10.0f) {
+                data.gas_resistance     = rtc_gas_res;
+                data.has_gas_resistance = true;
+            } else {
+                data.has_gas_resistance = false;
+            }
+
+            data.iaq     = rtc_iaq;
+            data.has_iaq = true;
 
             // SCD41
             if (scd41_data.co2 > 0) {
