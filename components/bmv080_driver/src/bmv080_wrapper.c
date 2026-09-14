@@ -189,6 +189,16 @@ bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle)
         return rslt;
     }
 
+    // Deshabilitar detección de obstrucción para evitar falsos positivos
+    // causados por reflejos del láser en la carcasa del nodo.
+    bool obstruction_off = false;
+    rslt                 = bmv080_set_parameter(bmv080_handle, "do_obstruction_detection", &obstruction_off);
+    if (rslt != E_BMV080_OK) {
+        ESP_LOGW(TAG, "No se pudo deshabilitar detección de obstrucción: %d (continuando)", rslt);
+    } else {
+        ESP_LOGI(TAG, "BMV080 obstruction detection disabled");
+    }
+
     // Obtener versión y sensor ID (Validación)
     char id[13] = {0};
     rslt        = bmv080_get_sensor_id(bmv080_handle, id);
