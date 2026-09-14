@@ -153,16 +153,15 @@ static void sensor_orchestration_task(void *pvParameters) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize RV1805 RTC! Timekeeping will fail.");
     } else {
-        // [RTC SYNC] Solo sincronizamos el reloj interno del ESP32 en Cold Boot
-        if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_TIMER) {
-            int64_t rv_time = 0;
-            if (rv1805_get_time_ns(rv1805_dev, &rv_time) == ESP_OK) {
-                struct timeval tv;
-                tv.tv_sec  = rv_time / 1000000000ULL;
-                tv.tv_usec = (rv_time % 1000000000ULL) / 1000;
-                settimeofday(&tv, NULL);
-                ESP_LOGI(TAG, "ESP32 POSIX Time synchronized from RV-1805 Hardware RTC.");
-            }
+        // [RTC SYNC] Sincronizamos el reloj interno del ESP32 en cada arranque (Cold Boot o Deep Sleep)
+        // para evitar derivas del RTC interno que rompan la máquina de estados de BSEC.
+        int64_t rv_time = 0;
+        if (rv1805_get_time_ns(rv1805_dev, &rv_time) == ESP_OK) {
+            struct timeval tv;
+            tv.tv_sec  = rv_time / 1000000000ULL;
+            tv.tv_usec = (rv_time % 1000000000ULL) / 1000;
+            settimeofday(&tv, NULL);
+            ESP_LOGI(TAG, "ESP32 POSIX Time synchronized from RV-1805 Hardware RTC.");
         }
     }
 

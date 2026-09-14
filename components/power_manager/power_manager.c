@@ -10,7 +10,7 @@ static const char *TAG = "power_manager";
 
 // Estado de la máquina almacenado en SRAM profunda
 RTC_DATA_ATTR static power_wake_state_t current_wake_state = PM_STATE_WAKE_A;
-RTC_DATA_ATTR static bool               rtc_is_calibration = true;
+RTC_DATA_ATTR static bool               rtc_is_calibration = false;
 
 // 4.85 segundos para la sincronización entre el SCD41 (5.0s) y el BMV080
 #define MICROSLEEP_TIME_US 4850000ULL
