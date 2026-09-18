@@ -32,7 +32,7 @@ Los cambios sobre las siguientes áreas MUST requerir review explícito de owner
 - `.github/` (Infraestructura CI/CD).
 - `docs/adr/` (Decisiones de arquitectura).
 - `partitions*` (Gestión de memoria flash).
-- Código fuente crítico: `boot`, cifrado de seguridad, gestión de energía (deep sleep) y stack de protocolo.
+- Código fuente crítico: `boot`, cifrado de seguridad, gestión de energía (sleep modes) y stack de protocolo.
 
 ## 4. Hardening de GitHub Actions
 Los workflows de GitHub Actions MUST seguir el principio de mínimo privilegio:

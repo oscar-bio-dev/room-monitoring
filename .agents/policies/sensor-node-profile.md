@@ -40,13 +40,16 @@
 
 **Decisión arquitectónica:** Este nodo usa `esp_sleep_enable_timer_wakeup()` exclusivamente. No se usa EXT0, ULP ni touch. No hay conflicto.
 
-### 2.3 Memoria RTC para BSEC
+### 2.3 Memoria y Estado BSEC
 
-**Contexto:** La librería BSEC v3.3 de Bosch requiere persistir ~2 KB de estado de calibración entre ciclos de Deep Sleep.
+**Light-Sleep (v1.x, modo de producción):**
+- BSEC mantiene su estado completo en RAM (variables `.bss` estáticas + heap allocations). NO se requiere `bsec_get_state()`/`bsec_set_state()`.
+- El filtro de Kalman converge naturalmente sin interrupciones de contexto.
+- La memoria RTC Slow sigue disponible para `boot_counter`, `node_config_t` y otros datos ligeros.
 
-**Patrón obligatorio:**
-- El estado BSEC MUST almacenarse en memoria RTC Slow (`RTC_DATA_ATTR`).
-- La memoria RTC Slow se mantiene viva automáticamente cuando hay variables `RTC_DATA_ATTR` declaradas en el programa.
+**Deep Sleep (v2.0, encapsulado bajo `CONFIG_ENABLE_DEEP_SLEEP_V2`):**
+- Requiere persistir ~4 KB de State Blob en `RTC_DATA_ATTR` mediante `bsec_get_state()`.
+- **Limitación documentada (ADR-001):** BSEC ULP (0.003333 Hz) produce `n_outputs=0` indefinidamente tras Deep Sleep del ESP32. El desfase temporal del boot (~7s + jitter del oscilador RTC ±5%) viola la tolerancia interna del filtro de Kalman.
 - El bug de corrupción de RTC en alta temperatura (ar2024-005) **NO afecta** al ESP32 clásico (solo ESP32-C3/S3).
 
 ## §3. Pinout Map — SparkFun IoT RedBoard ESP32
@@ -117,47 +120,62 @@ El esquema canónico del ecosistema es `TelemetryPayload` definido en:
 | `battery_mv` | 20 | uint32 | ADC (futuro) |
 | `sleep_cycles` | 21 | uint32 | Contador RTC |
 
-## §5. Máquina de Estados de Doble Despertar
+## §5. Máquina de Estados (Smart Light-Sleep v1.x)
 
 ```
-                  ┌──────────────────────────────┐
-                  │     DEEP SLEEP (Master)       │
-                  │  3s (calibración) / 5min (op) │
-                  └──────────────┬───────────────┘
-                                 │ Timer Wakeup
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │       WAKE A: Trigger         │
-                  │  • BMV080: Calentar láser     │
-                  │  • SCD41:  Trigger single-shot│
-                  │  • BME688: BSEC read IAQ      │
-                  └──────────────┬───────────────┘
-                                 │
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │    LIGHT SLEEP (4.85s)        │
-                  │  SCD41 procesa su medición    │
-                  │  I2C bus preservado           │
-                  └──────────────┬───────────────┘
-                                 │ Timer Wakeup
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │     WAKE B: Collect & TX      │
-                  │  • SCD41:  Leer CO₂           │
-                  │  • BMV080: Leer PM (purga+1)  │
-                  │  • Pack:   Protobuf (Nanopb)  │
-                  │  • TX:     ESP-NOW encriptado  │
-                  │  • Fail?:  SD Store-and-Fwd   │
-                  │  • OK?:    Vaciar Caja Negra  │
-                  └──────────────┬───────────────┘
-                                 │
-                                 ▼
-                  ┌──────────────────────────────┐
-                  │  gpio_hold_en(SDA, SCL)       │
-                  │  Aislar SPI (si se usó SD)    │
-                  │          → DEEP SLEEP         │
-                  └──────────────────────────────┘
+              ┌──────────────────────────────┐
+              │    COLD BOOT (Power-On)       │
+              │  • I2C bus init + 9-pulse rcv  │
+              │  • RV-1805 time sync           │
+              │  • BSEC init (1 Hz Continuous)  │
+              │  • SCD41 + BMV080 init          │
+              └──────────────┬───────────────┘
+                             │
+                             ▼
+              ┌──────────────────────────────┐
+              │  FASE 1: WARMUP (12 pulsos)   │
+              │  • BSEC 1 Hz × 12 (~60s)       │
+              │  • BMV080 continuous            │
+              │  • SCD41 periodic (5s)          │
+              │  • ESP-NOW TX cada pulso        │
+              │  • is_calibrating = true        │
+              │  • IAQ Accuracy: 0 → 1          │
+              └──────────────┬───────────────┘
+                             │ Pulso 12/12
+                             ▼
+              ┌──────────────────────────────┐
+              │  TRANSICIÓN BSEC               │
+              │  Continuous (1Hz) → ULP/LP     │
+              │  mark_state_stale()            │
+              └──────────────┬───────────────┘
+                             │
+                             ▼
+        ┌─────►┌──────────────────────────────┐
+        │       │  FASE 2: PRODUCCIÓN           │
+        │       │  • BSEC ULP/LP measure         │
+        │       │  • SCD41 single-shot (5s)      │
+        │       │  • BMV080 duty-cycle            │
+        │       │  • ESP-NOW TX                   │
+        │       │  • SD fallback si ACK fail      │
+        │       └──────────────┬───────────────┘
+        │                      │
+        │                      ▼
+        │       ┌──────────────────────────────┐
+        │       │  LIGHT-SLEEP (Timer Wakeup)   │
+        │       │  Duración según modo:          │
+        │       │  Mode 0: ~5s   (LP BSEC)      │
+        │       │  Mode 1: ~55s  (LP BSEC)      │
+        │       │  Mode 2: ~293s (ULP BSEC)     │
+        │       │  RAM + RTOS + BSEC retenidos   │
+        │       └──────────────┬───────────────┘
+        │                      │ Timer Wakeup
+        └──────────────────────┘
 ```
+
+> **Nota histórica:** La arquitectura original usaba Deep Sleep como ciclo maestro
+> (WAKE_A → Light-Sleep 4.85s → WAKE_B → Deep Sleep). Este diseño fue abandonado
+> tras la auditoría de BSEC (ADR-001). El código de Deep Sleep se preserva bajo
+> `#ifdef CONFIG_ENABLE_DEEP_SLEEP_V2`.
 
 ## §6. Checks de CI Específicos del Nodo
 
@@ -181,8 +199,8 @@ Los siguientes directorios MUST excluirse de `clang-format` y hooks de estilo:
 
 | # | Riesgo | Severidad | Mitigación | Estado |
 |---|--------|-----------|-----------|--------|
-| R1 | I2C Latch-up tras Deep Sleep (SDA LOW) | 🔴 Crítico | `gpio_hold_en()` + 9 pulsos recovery en Cold Boot | ✅ Mitigado |
-| R2 | BSEC state corruption entre ciclos de sueño | 🔴 Crítico | Estado en `RTC_DATA_ATTR`, restauración en init | ✅ Mitigado |
+| R1 | I2C Latch-up tras power cycle (SDA LOW) | 🔴 Crítico | `gpio_hold_en()` en Deep Sleep + 9 pulsos recovery en Cold Boot. En Light-Sleep, el bus se retiene automáticamente. | ✅ Mitigado |
+| R2 | BSEC state loss entre ciclos de sueño | 🔴 Crítico | Light-Sleep retiene RAM completa (v1.x). Deep Sleep requiere RTC blob — encapsulado en v2.0 por incompatibilidad temporal (ADR-001). | ✅ Mitigado |
 | R3 | BMV080 FIFO overflow por polling lento | 🟠 Alto | Fast-polling 100ms + buffer flush de 15 lecturas | ✅ Mitigado |
 | R4 | Brown-out por ráfagas RF sostenidas | 🟠 Alto | Batched Recovery: máx 15 registros por despertar | ✅ Mitigado |
 | R5 | ESP-NOW sin encriptación (texto plano) | 🔴 Crítico | PMK/LMK vía Kconfig + `encrypt=true` | 🔄 En progreso |
@@ -190,6 +208,7 @@ Los siguientes directorios MUST excluirse de `clang-format` y hooks de estilo:
 | R7 | Un solo desarrollador → bus factor = 1 | 🟡 Medio | Documentación exhaustiva, ADRs, gobernanza | 🔄 En progreso |
 | R8 | ADC de batería no implementado | 🟡 Medio | Campo `battery_mv` presente pero siempre 0 | ⏳ Pendiente |
 | R9 | Provisioning de llaves ESP-NOW sin UI | 🟡 Medio | Kconfig para desarrollo; NVS encriptado para producción | ⏳ Pendiente |
+| R10 | BSEC ULP incompatible con Deep Sleep ESP32 (`n_outputs=0` indefinido) | 🔴 Crítico | Pivot a Smart Light-Sleep (ADR-001). Código Deep Sleep encapsulado bajo `CONFIG_ENABLE_DEEP_SLEEP_V2`. | ✅ Mitigado |
 
 ## §8. Roadmap de Hardening de Seguridad
 

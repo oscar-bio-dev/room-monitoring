@@ -9,7 +9,7 @@ Este documento representa la **Capa 1 (Política Global Ejecutiva)**. Todo cambi
 - **Capa 3 (Perfil del Nodo Sensor):** `policies/sensor-node-profile.md` (Hardware BOM, erratas de silicio, pinout, restricciones energéticas, riesgos).
 
 > ⚠️ **INSTRUCCIÓN CRÍTICA PARA EL AGENTE:**
-> Antes de modificar código de hardware (GPIO, I2C, SPI, Deep Sleep, PMU), protocolo de red (ESP-NOW), o la serialización de datos (Protobuf/Nanopb), **MUST** leer primero `policies/sensor-node-profile.md` para consultar erratas de silicio, pinout validado, contrato de datos con el Gateway y patrones obligatorios de energía.
+> Antes de modificar código de hardware (GPIO, I2C, SPI, Sleep Modes, PMU), protocolo de red (ESP-NOW), o la serialización de datos (Protobuf/Nanopb), **MUST** leer primero `policies/sensor-node-profile.md` y cualquier ADR relevante en `docs/` para consultar erratas de silicio, decisiones arquitectónicas vigentes, pinout validado, contrato de datos con el Gateway y patrones obligatorios de energía.
 
 > ⚠️ **CONSULTA MCP OBLIGATORIA:**
 > Para cualquier cambio que afecte inicialización de hardware o selección de componentes, el agente MUST consultar proactivamente:
@@ -32,7 +32,7 @@ Este documento representa la **Capa 1 (Política Global Ejecutiva)**. Todo cambi
 - `CHANGELOG.md` MUST seguir Keep a Changelog + SemVer.
 - Puntos de Restauración Seguros (Git): Una vez completado el "scaffolding", es obligatorio inicializar el repositorio y generar un commit inicial.
 - README MUST reflejar estado real del proyecto; no se permite "feature drift".
-- Decisiones de arquitectura críticas MUST registrarse en `docs/adr/`.
+- Decisiones de arquitectura críticas MUST registrarse en `docs/` como ADRs (Architecture Decision Records).
 
 ## 3) Arquitectura de Software e Infraestructura
 - `/main` MUST contener solo orquestación y arranque.
@@ -54,12 +54,24 @@ Este documento representa la **Capa 1 (Política Global Ejecutiva)**. Todo cambi
 - Timeouts/reintentos MUST definirse por componente y documentarse.
 - **Lecturas con CRC:** Todas las lecturas críticas de sensores I2C (SCD41) MUST validarse mediante CRC-8 antes de aceptar los datos.
 
-## 6) Energía y Deep Sleep
-- Estado entre ciclos MUST persistirse con `RTC_DATA_ATTR` (mínimo footprint).
-- **Aislamiento de Hardware (Pin Retention):** Durante el Deep Sleep, el dominio de energía principal colapsa. Es obligatorio aislar los dominios RTC (ej. `esp_sleep_pd_config`) y retener el estado lógico usando `gpio_hold_en()` sobre pines que alimenten buses externos (I2C) para prevenir apagones en sensores ópticos o corrientes parásitas.
+## 6) Energía y Gestión de Sueño
+
+### 6.1 Smart Light-Sleep (Modo de Producción v1.x)
+- El nodo MUST usar `esp_light_sleep_start()` con timer wakeup para todos los modos de monitoreo (5s / 1min / 5min). Ver [ADR-001](docs/ADR-001-Power-Management-BSEC.md) para la justificación técnica.
+- RAM completa (RTOS + heap + variables `.bss` de BSEC) se retiene automáticamente. NO se requiere serialización de estado (`bsec_get_state()`/`bsec_set_state()`).
+- Los periféricos RTC MUST permanecer encendidos durante Light-Sleep (errata RTC-126, ver `sensor-node-profile.md §2.1`).
+- El bus I2C NO requiere re-inicialización al despertar de Light-Sleep.
+- Cada módulo crítico SHOULD exponer métricas de consumo/latencia por ciclo.
+
+### 6.2 Deep Sleep (Encapsulado para v2.0 — `CONFIG_ENABLE_DEEP_SLEEP_V2`)
+- Código preservado bajo `#ifdef CONFIG_ENABLE_DEEP_SLEEP_V2` para futura migración a ESP32-S3/C6 o BSEC 4.x.
+- Cuando habilitado, estado entre ciclos MUST persistirse con `RTC_DATA_ATTR` (mínimo footprint).
+- **Aislamiento de Hardware (Pin Retention):** Durante el Deep Sleep, el dominio de energía principal colapsa. Es obligatorio retener el estado lógico usando `gpio_hold_en()` sobre pines que alimenten buses externos (I2C) para prevenir apagones en sensores ópticos o corrientes parásitas.
+- **Limitación conocida:** BSEC ULP (0.003333 Hz) produce `n_outputs=0` indefinidamente tras Deep Sleep del ESP32 por desfase temporal del boot (~7s + jitter RTC). Ver ADR-001.
+
+### 6.3 Reglas Comunes (Ambos Modos)
 - **Bus SPI MicroSD:** El bus VSPI de la tarjeta SD MUST permanecer apagado por defecto. Solo se inicializa *on-demand* si falla la transmisión ESP-NOW (Caja Negra / Store-and-Forward). Al finalizar la operación, los pines MUST revertirse con `gpio_reset_pin()` para impedir fugas de corriente.
 - **Anti Brown-out (Batched Recovery):** Al vaciar el buffer offline, el nodo MUST enviar un máximo de 15 registros por despertar para evitar picos de corriente sostenidos por la radio que colapsen el regulador LDO.
-- Cada módulo crítico SHOULD exponer métricas de consumo/latencia por ciclo.
 
 ## 7) Seguridad de Comunicaciones (ESP-NOW)
 - **Encriptación obligatoria:** Los datos MUST transmitirse encriptados por ESP-NOW (CCMP-128). Queda **terminantemente prohibido** enviar telemetría en texto plano (`peer_info.encrypt = false` es un estado de desarrollo que MUST eliminarse antes de producción).
