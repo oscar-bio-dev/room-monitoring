@@ -35,6 +35,31 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
                             float *gas_resistance);
 
 /**
+ * @brief Marca el state blob actual como "stale" (proveniente de CONTINUOUS mode).
+ *
+ * Llamar al final del Warmup, justo después de bme688_bsec_set_sample_rate(ULP).
+ * Esto evita que el primer ciclo ULP post-Deep-Sleep restaure un blob de CONTINUOUS,
+ * lo cual causaría n_outputs=0 indefinido por confusión del filtro de Kalman.
+ */
+void bme688_bsec_mark_state_stale(void);
+
+/**
+ * @brief Resetea TODO el estado BSEC en RTC SRAM.
+ *        Llamar en Cold Boot (power-on / flash) para invalidar estado stale.
+ */
+void bme688_bsec_reset_rtc_state(void);
+
+/**
+ * @brief Retorna el último timestamp next_call (ns) de bsec_sensor_control().
+ *
+ * Usar para calcular dinámicamente el tiempo de Deep Sleep:
+ *   sleep_us = (next_call_ns - now_ns - overhead_ns) / 1000
+ *
+ * @return int64_t Timestamp en nanosegundos del próximo muestreo BSEC.
+ */
+int64_t bme688_bsec_get_next_call_ns(void);
+
+/**
  * @brief Lectura directa en Forced Mode (sin BSEC). Obtiene T/P/H/Gas crudos.
  *        Usar cuando el intervalo de muestreo no coincide con LP ni ULP.
  *

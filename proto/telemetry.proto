@@ -44,4 +44,5 @@ message TelemetryPayload {
     // === Diagnósticos del Nodo ===
     optional uint32 battery_mv = 20;      // Millivolts (ADC, futuro)
     optional uint32 sleep_cycles = 21;    // Hardware wake count
+    optional bool is_calibrating = 22;    // true = datos parciales (BSEC anchor point o warmup)
 }

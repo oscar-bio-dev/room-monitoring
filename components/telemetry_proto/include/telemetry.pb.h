@@ -50,6 +50,8 @@ typedef struct _telemetry_TelemetryPayload {
     uint32_t battery_mv; /* Millivolts (ADC, futuro) */
     bool     has_sleep_cycles;
     uint32_t sleep_cycles; /* Hardware wake count */
+    bool     has_is_calibrating;
+    bool     is_calibrating; /* true = datos parciales (BSEC anchor point o warmup) */
 } telemetry_TelemetryPayload;
 
 #ifdef __cplusplus
@@ -60,12 +62,12 @@ extern "C" {
 #define telemetry_TelemetryPayload_init_default                                                                        \
     {                                                                                                                  \
         false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0,  \
-            false, 0, false, 0, false, 0, false, 0                                                                     \
+            false, 0, false, 0, false, 0, false, 0, false, 0                                                           \
     }
 #define telemetry_TelemetryPayload_init_zero                                                                           \
     {                                                                                                                  \
         false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0,  \
-            false, 0, false, 0, false, 0, false, 0                                                                     \
+            false, 0, false, 0, false, 0, false, 0, false, 0                                                           \
     }
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -84,6 +86,7 @@ extern "C" {
 #define telemetry_TelemetryPayload_pm10_0_tag 17
 #define telemetry_TelemetryPayload_battery_mv_tag 20
 #define telemetry_TelemetryPayload_sleep_cycles_tag 21
+#define telemetry_TelemetryPayload_is_calibrating_tag 22
 
 /* Struct field encoding specification for nanopb */
 #define telemetry_TelemetryPayload_FIELDLIST(X, a)                                                                     \
@@ -101,7 +104,8 @@ extern "C" {
     X(a, STATIC, OPTIONAL, FLOAT, pm2_5, 16)                                                                           \
     X(a, STATIC, OPTIONAL, FLOAT, pm10_0, 17)                                                                          \
     X(a, STATIC, OPTIONAL, UINT32, battery_mv, 20)                                                                     \
-    X(a, STATIC, OPTIONAL, UINT32, sleep_cycles, 21)
+    X(a, STATIC, OPTIONAL, UINT32, sleep_cycles, 21)                                                                   \
+    X(a, STATIC, OPTIONAL, BOOL, is_calibrating, 22)
 #define telemetry_TelemetryPayload_CALLBACK NULL
 #define telemetry_TelemetryPayload_DEFAULT NULL
 
@@ -112,7 +116,7 @@ extern const pb_msgdesc_t telemetry_TelemetryPayload_msg;
 
 /* Maximum encoded size of messages (where known) */
 #define TELEMETRY_TELEMETRY_PB_H_MAX_SIZE telemetry_TelemetryPayload_size
-#define telemetry_TelemetryPayload_size 91
+#define telemetry_TelemetryPayload_size 94
 
 #ifdef __cplusplus
 } /* extern "C" */

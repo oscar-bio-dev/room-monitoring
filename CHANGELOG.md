@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### Added
+- **ADR-001 (Architecture Decision Record):** Documento formal en `docs/ADR-001-Power-Management-BSEC.md` que registra el fallo del Deep Sleep con BSEC 3.0 ULP, la evaluación del ULP-FSM del ESP32, y la decisión de pivotar a Smart Light-Sleep.
+- **Cálculo Dinámico de Deep Sleep (BSEC-synced):** El intervalo de Deep Sleep se calcula en tiempo real desde `1/sample_rate` del modo BSEC activo, en lugar de usar el valor fijo de `next_call` (+3s polling interno). Produce ciclos de 279s + 21s activo = 300s exactos para ULP.
+- **Fallback RAW en Anchor Point:** Cuando BSEC retorna `n_outputs=0` (primer ciclo ULP), el wrapper extrae T/H/P/Gas directamente del BME688 y los reporta como fallback con `IAQ=0.0, Accuracy=0`.
+- **Persistencia Incondicional del State Blob:** `rtc_bsec_ulp_established` se marca `true` siempre que `bsec_get_state()` retorna `BSEC_OK`, independientemente de `n_outputs`, rompiendo el bucle de "amnesia infinita".
+- **Logs de diagnóstico BSEC:** Timestamps, heater config, `next_call` nativo, período derivado y deep sleep dinámico visibles en cada ciclo.
+
+### Changed
+- **Modos de Energía (refactor conceptual):** Los 3 modos (5s/1min/5min) dejan de depender de Deep Sleep para su ciclo largo. La implementación de Light-Sleep está pendiente del refactor post-ADR-001.
+- El campo `is_calibrating` ahora se basa exclusivamente en los 12 pulsos de warmup (Fase 1), no en el estado post-Deep-Sleep.
+
+### Deprecated
+- **Deep Sleep como modo de producción:** Encapsulado para v2.0 bajo `#ifdef CONFIG_ENABLE_DEEP_SLEEP_V2`. El código de RTC persistence, `gpio_hold_en`, `boot_counter` y cálculo dinámico de sleep se preserva para futura migración a ESP32-S3/C6 o BSEC 4.x.
 
 ## [0.6.0] - 2026-09-03
 ### Added

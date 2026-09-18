@@ -121,5 +121,15 @@ Este proyecto sigue políticas estrictas de gobierno:
 - [x] **Fase 2a:** Máquina de Estados de Doble Despertar (4.85s) y Aislamiento `gpio_hold_en`.
 - [x] **Fase 2b:** Integración Total de SCD41, BMV080, RTC Hardware Híbrido (RV-1805) y estabilización de bus I2C.
 - [x] **Fase 3:** Telemetría Resiliente ESP-NOW y "Caja Negra" Store-and-Forward (MicroSD SPI) con Nanopb.
+- [x] **Fase 3b:** Auditoría BSEC Deep Sleep — ADR-001 aprobado. Pivot a Smart Light-Sleep. Ver [`docs/ADR-001-Power-Management-BSEC.md`](docs/ADR-001-Power-Management-BSEC.md).
+- [ ] **Fase 3c:** Refactor Smart Light-Sleep (3 modos: 5s / 1min / 5min con `esp_light_sleep_start()`).
 - [ ] **Fase 4:** Gateway Criptográfico Edge (ESP32-P4) con conectividad a Google Cloud.
 - [ ] **Fase 5:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
+
+---
+
+## 📄 Decisiones Arquitectónicas
+
+| ADR | Título | Estado |
+|-----|--------|--------|
+| [ADR-001](docs/ADR-001-Power-Management-BSEC.md) | Power Management — BSEC Deep Sleep Failure & Smart Light-Sleep Pivot | ✅ Aceptado |
