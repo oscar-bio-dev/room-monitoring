@@ -85,8 +85,8 @@ extern "C" {
 #define BSEC_MAX_PHYSICAL_SENSOR                                                                                       \
     (8) /*!< Number of physical sensors that need allocated space before calling bsec_update_subscription() */
 #define BSEC_MAX_PROPERTY_BLOB_SIZE                                                                                    \
-    (550) /*!< Maximum size (in bytes) of the data blobs returned by bsec_get_configuration() */
-#define BSEC_MAX_STATE_BLOB_SIZE (197) /*!< Maximum size (in bytes) of the data blobs returned by bsec_get_state()*/
+    (550) /*! Maximum size (in bytes) of the data blobs returned by bsec_get_configuration() */
+#define BSEC_MAX_STATE_BLOB_SIZE (197) /*! Maximum size (in bytes) of the data blobs returned by bsec_get_state()*/
 #define BSEC_SAMPLE_RATE_DISABLED (65535.0f) /*!< Sample rate of a disabled sensor */
 #define BSEC_SAMPLE_RATE_ULP (0.0033333f)    /*!< Sample rate in case of Ultra Low Power Mode */
 #define BSEC_SAMPLE_RATE_CONT (1.0f)         /*!< Sample rate in case of Continuous Mode */
@@ -105,8 +105,8 @@ extern "C" {
     (1 << (BSEC_INPUT_GASRESISTOR - 1)) /*!< process_data bitfield constant for gas sensor @sa bsec_bme_settings_t */
 #define BSEC_PROCESS_PROFILE_PART                                                                                      \
     (1 << (BSEC_INPUT_PROFILE_PART - 1))  /*!< process_data bitfield constant for gas sensor @sa bsec_bme_settings_t */
-#define BSEC_NUMBER_OUTPUTS (15)          /*!< Number of outputs, depending on solution */
-#define BSEC_OUTPUT_INCLUDED (1074952687) /*!< bitfield that indicates which outputs are included in the solution */
+#define BSEC_NUMBER_OUTPUTS (15)          /*! Number of outputs, depending on solution (IAQ) */
+#define BSEC_OUTPUT_INCLUDED (1074952687) /*! bitfield that indicates which outputs are included in the solution */
 
 /*!
  * @brief Enumeration for input (physical) sensors.

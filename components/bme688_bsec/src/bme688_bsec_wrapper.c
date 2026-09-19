@@ -62,8 +62,8 @@ static int8_t configure_bsec_subscriptions(float sample_rate) {
     if (!bsec_instance)
         return -1;
 
-    bsec_sensor_configuration_t requested_virtual_sensors[9];
-    uint8_t                     n_requested_virtual_sensors = 9;
+    bsec_sensor_configuration_t requested_virtual_sensors[7];
+    uint8_t                     n_requested_virtual_sensors = 7;
 
     requested_virtual_sensors[0].sensor_id   = BSEC_OUTPUT_IAQ;
     requested_virtual_sensors[0].sample_rate = sample_rate;
@@ -79,10 +79,6 @@ static int8_t configure_bsec_subscriptions(float sample_rate) {
     requested_virtual_sensors[5].sample_rate = sample_rate;
     requested_virtual_sensors[6].sensor_id   = BSEC_OUTPUT_CO2_EQUIVALENT;
     requested_virtual_sensors[6].sample_rate = sample_rate;
-    requested_virtual_sensors[7].sensor_id   = BSEC_OUTPUT_BREATH_VOC_EQUIVALENT;
-    requested_virtual_sensors[7].sample_rate = sample_rate;
-    requested_virtual_sensors[8].sensor_id   = BSEC_OUTPUT_TVOC_EQUIVALENT;
-    requested_virtual_sensors[8].sample_rate = sample_rate;
 
     bsec_sensor_configuration_t required_sensor_settings[BSEC_MAX_PHYSICAL_SENSOR];
     uint8_t                     n_required_sensor_settings = BSEC_MAX_PHYSICAL_SENSOR;
