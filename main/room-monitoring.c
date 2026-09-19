@@ -117,7 +117,7 @@ static esp_err_t retry_scd41_read(scd41_data_t *data) {
  * NOTA: La radio Wi-Fi DEBE estar encendida antes de llamar esta función.
  *       El caller es responsable de network_manager_wake/sleep.
  * ──────────────────────────────────────────────────────────────────────────── */
-static void transmit_telemetry(const scd41_data_t *scd41_data, float pm1, float pm25, float pm10) {
+static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_reading_t *bmv080_data) {
     TelemetryPayload data = TelemetryPayload_init_zero;
 
     // Versioning
@@ -178,14 +178,28 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, float pm1, float 
         data.has_tvoc = true;
     }
 
-    // BMV080
-    if (is_pro_model && (pm1 > 0 || pm25 > 0)) {
-        data.pm1_0      = pm1;
+    // BMV080 — Masa + Conteo + Flags
+    if (is_pro_model && bmv080_data && (bmv080_data->pm1_mass > 0 || bmv080_data->pm2_5_mass > 0)) {
+        data.pm1_0      = bmv080_data->pm1_mass;
         data.has_pm1_0  = true;
-        data.pm2_5      = pm25;
+        data.pm2_5      = bmv080_data->pm2_5_mass;
         data.has_pm2_5  = true;
-        data.pm10_0     = pm10;
+        data.pm10_0     = bmv080_data->pm10_mass;
         data.has_pm10_0 = true;
+
+        data.pm1_0_count      = bmv080_data->pm1_count;
+        data.has_pm1_0_count  = true;
+        data.pm2_5_count      = bmv080_data->pm2_5_count;
+        data.has_pm2_5_count  = true;
+        data.pm10_0_count     = bmv080_data->pm10_count;
+        data.has_pm10_0_count = true;
+
+        data.is_laser_obstructed     = bmv080_data->is_obstructed;
+        data.has_is_laser_obstructed = true;
+        data.is_pm_out_of_range      = bmv080_data->is_outside_range;
+        data.has_is_pm_out_of_range  = true;
+        data.laser_runtime           = bmv080_data->runtime_sec;
+        data.has_laser_runtime       = true;
     }
 
     // Diagnóstico
@@ -294,23 +308,32 @@ static void run_warmup_phase(bool bme_initialized) {
                      scd41_data.temperature, scd41_data.humidity);
         }
 
-        // Leer BMV080
-        float pm1 = 0, pm25 = 0, pm10 = 0;
+        // Leer BMV080 (lectura completa: masa + conteo + flags)
+        bmv080_reading_t bmv080_data = {0};
         if (is_pro_model) {
-            int bmv_rslt = bmv080_wrapper_read_data(&pm1, &pm25, &pm10);
-            if (bmv_rslt == 0 && (pm1 > 0 || pm25 > 0)) {
-                ESP_LOGI(TAG, "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3", pm1, pm25, pm10);
+            int bmv_rslt = bmv080_wrapper_read_full(&bmv080_data);
+            if (bmv_rslt == 0 && (bmv080_data.pm1_mass > 0 || bmv080_data.pm2_5_mass > 0)) {
+                ESP_LOGI(TAG,
+                         "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3 | "
+                         "#1: %.0f | #2.5: %.0f | #10: %.0f /m3",
+                         bmv080_data.pm1_mass, bmv080_data.pm2_5_mass, bmv080_data.pm10_mass, bmv080_data.pm1_count,
+                         bmv080_data.pm2_5_count, bmv080_data.pm10_count);
+            }
+            if (bmv080_data.is_obstructed) {
+                ESP_LOGW(TAG, "BMV080  ⚠️ OBSTRUCTED — lente sucia");
             }
         }
 
         // Log
-        ESP_LOGI(TAG, "BME688  -> IAQ: %.1f (Acc: %d) | Temp: %.2f C | Hum: %.2f %% | P: %.1f hPa | Gas: %.0f Ω",
-                 rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res);
+        ESP_LOGI(
+            TAG,
+            "BME688  -> IAQ: %.1f (Acc: %d) | Temp: %.2f C | Hum: %.2f %% | P: %.1f hPa | Gas: %.0f Ω | eCO2: %.0f ppm",
+            rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res, rtc_eco2);
         ESP_LOGI(TAG, "🔥 Calibration pulse %d/%d", pulse_num, PM_WARMUP_TOTAL_CYCLES);
 
         // Encender Wi-Fi → Transmitir → Apagar Wi-Fi
         network_manager_wake();
-        transmit_telemetry(&scd41_data, pm1, pm25, pm10);
+        transmit_telemetry(&scd41_data, &bmv080_data);
         network_manager_sleep();
 
         // Tick del warmup
@@ -329,9 +352,9 @@ static void run_warmup_phase(bool bme_initialized) {
 #endif
     }
 
-    // Apagar BMV080 antes de entrar en producción
+    // Detener medición BMV080 (handle sobrevive Light-Sleep para reusar en producción)
     if (is_pro_model) {
-        bmv080_wrapper_deinit();
+        bmv080_wrapper_stop();
     }
 
     ESP_LOGI(TAG, "═══════════════════════════════════════════════════");
@@ -368,7 +391,7 @@ static void run_production_cycle(bool bme_initialized) {
         // Iniciar BMV080 una vez (permanece encendido)
         bool bmv080_active = false;
         if (is_pro_model) {
-            if (bmv080_wrapper_init(bmv080_dev) == E_BMV080_OK) {
+            if (bmv080_wrapper_start() == E_BMV080_OK) {
                 bmv080_active = true;
                 ESP_LOGI(TAG, "BMV080  ✅ Láser encendido (continuo)");
             }
@@ -387,9 +410,9 @@ static void run_production_cycle(bool bme_initialized) {
             }
 
             // 2. Purgar FIFO del BMV080
-            float pm1 = 0, pm25 = 0, pm10 = 0;
+            bmv080_reading_t bmv080_data = {0};
             if (bmv080_active) {
-                bmv080_wrapper_read_data(&pm1, &pm25, &pm10);
+                bmv080_wrapper_read_full(&bmv080_data);
             }
 
             scd41_tick_counter++;
@@ -413,16 +436,25 @@ static void run_production_cycle(bool bme_initialized) {
                 }
 
                 // Log completo
-                ESP_LOGI(TAG, "BME688  -> IAQ: %.1f (Acc: %d) | T: %.2f C | H: %.2f %% | P: %.1f hPa | Gas: %.0f Ω",
-                         rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res);
-                if (bmv080_active && (pm1 > 0 || pm25 > 0)) {
-                    ESP_LOGI(TAG, "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f", pm1, pm25, pm10);
+                ESP_LOGI(TAG,
+                         "BME688  -> IAQ: %.1f (Acc: %d) | T: %.2f C | H: %.2f %% | P: %.1f hPa | Gas: %.0f Ω | eCO2: "
+                         "%.0f ppm",
+                         rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res, rtc_eco2);
+                if (bmv080_active && (bmv080_data.pm1_mass > 0 || bmv080_data.pm2_5_mass > 0)) {
+                    ESP_LOGI(TAG,
+                             "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3 | "
+                             "#1: %.0f | #2.5: %.0f | #10: %.0f /m3",
+                             bmv080_data.pm1_mass, bmv080_data.pm2_5_mass, bmv080_data.pm10_mass, bmv080_data.pm1_count,
+                             bmv080_data.pm2_5_count, bmv080_data.pm10_count);
+                }
+                if (bmv080_data.is_obstructed) {
+                    ESP_LOGW(TAG, "BMV080  ⚠️ OBSTRUCTED — lente sucia");
                 }
                 ESP_LOGI(TAG, "Runtime: heap=%u bytes", (unsigned int) esp_get_free_heap_size());
 
                 // Wi-Fi Wake → TX → Wi-Fi Sleep
                 network_manager_wake();
-                transmit_telemetry(&scd41_data, pm1, pm25, pm10);
+                transmit_telemetry(&scd41_data, &bmv080_data);
                 network_manager_sleep();
             }
 
@@ -458,8 +490,8 @@ static void run_production_cycle(bool bme_initialized) {
                 if (r == 0) {
                     ESP_LOGI(TAG,
                              "BME688  ✅ BSEC ULP | IAQ: %.1f (Acc: %d) | T: %.1f | H: %.1f | P: %.1f hPa | Gas: "
-                             "%.0f Ω",
-                             rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res);
+                             "%.0f Ω | eCO2: %.0f ppm",
+                             rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res, rtc_eco2);
                 } else if (r == -2) {
                     ESP_LOGI(TAG, "BME688  ⏳ No trigger (cached: IAQ=%.1f T=%.1f)", rtc_iaq, rtc_temp);
                 } else {
@@ -479,19 +511,19 @@ static void run_production_cycle(bool bme_initialized) {
                 ESP_LOGE(TAG, "SCD41 trigger failed");
             }
 
-            /* ── PASO 4: Init BMV080 + Sub-bucle de Integración ─────── */
+            /* ── PASO 4: Start BMV080 Measurement ──────────────────── */
             bool bmv080_active = false;
             if (is_pro_model) {
-                if (bmv080_wrapper_init(bmv080_dev) == E_BMV080_OK) {
+                if (bmv080_wrapper_start() == E_BMV080_OK) {
                     ESP_LOGI(TAG, "BMV080  ✅ Láser encendido");
                     bmv080_active = true;
                 } else {
-                    ESP_LOGW(TAG, "BMV080  ❌ Init failed this cycle");
+                    ESP_LOGW(TAG, "BMV080  ❌ Start failed this cycle");
                 }
             }
 
-            /* Sub-bucle: Light-Sleep + BMV080 FIFO drain (~5-10s) */
-            int integration_ticks = (is_pro_model && bmv080_active) ? 10 : 5;
+            /* Sub-bucle: Light-Sleep + BMV080 FIFO drain (~12s ≥ integration_time + 1.17s) */
+            int integration_ticks = (is_pro_model && bmv080_active) ? 12 : 5;
             ESP_LOGI(TAG, "⏳ Integration sub-loop: %d × 1s Light-Sleep", integration_ticks);
 
             for (int tick = 0; tick < integration_ticks; tick++) {
@@ -512,24 +544,33 @@ static void run_production_cycle(bool bme_initialized) {
                 scd41_data.co2 = 0;
             }
 
-            float pm1 = 0, pm25 = 0, pm10 = 0;
+            bmv080_reading_t bmv080_data = {0};
             if (bmv080_active) {
-                int bmv_rslt = bmv080_wrapper_read_data(&pm1, &pm25, &pm10);
-                if (bmv_rslt == 0 && (pm1 > 0 || pm25 > 0)) {
-                    ESP_LOGI(TAG, "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3", pm1, pm25, pm10);
+                int bmv_rslt = bmv080_wrapper_read_full(&bmv080_data);
+                if (bmv_rslt == 0 && (bmv080_data.pm1_mass > 0 || bmv080_data.pm2_5_mass > 0)) {
+                    ESP_LOGI(TAG,
+                             "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3 | "
+                             "#1: %.0f | #2.5: %.0f | #10: %.0f /m3",
+                             bmv080_data.pm1_mass, bmv080_data.pm2_5_mass, bmv080_data.pm10_mass, bmv080_data.pm1_count,
+                             bmv080_data.pm2_5_count, bmv080_data.pm10_count);
                 }
-                bmv080_wrapper_deinit();
+                if (bmv080_data.is_obstructed) {
+                    ESP_LOGW(TAG, "BMV080  ⚠️ OBSTRUCTED — lente sucia");
+                }
+                bmv080_wrapper_stop(); // Láser a sleep (< 30 µA), handle retenido en RAM
             }
 
             /* ── PASO 6: Log + Transmisión ───────────────────────────── */
-            ESP_LOGI(TAG, "BME688  -> IAQ: %.1f (Acc: %d) | Temp: %.2f C | Hum: %.2f %% | P: %.1f hPa | Gas: %.0f Ω",
-                     rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res);
+            ESP_LOGI(TAG,
+                     "BME688  -> IAQ: %.1f (Acc: %d) | Temp: %.2f C | Hum: %.2f %% | P: %.1f hPa | Gas: %.0f Ω | eCO2: "
+                     "%.0f ppm",
+                     rtc_iaq, rtc_acc, rtc_temp, rtc_hum, rtc_pressure, rtc_gas_res, rtc_eco2);
             ESP_LOGI(TAG, "Runtime: heap=%u bytes, stack=%u bytes", (unsigned int) esp_get_free_heap_size(),
                      (unsigned int) (uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
 
             // Wi-Fi Wake → TX → Wi-Fi Sleep
             network_manager_wake();
-            transmit_telemetry(&scd41_data, pm1, pm25, pm10);
+            transmit_telemetry(&scd41_data, &bmv080_data);
             network_manager_sleep();
 
             /* ── PASO 7: Smart Light-Sleep Dinámico (~295s) ──────────── */
@@ -600,11 +641,13 @@ static void run_production_cycle(bool bme_initialized) {
         bool bmv080_active = false;
         if (is_pro_model) {
             if (bmv080_wrapper_init(bmv080_dev) == E_BMV080_OK) {
-                bmv080_active = true;
+                if (bmv080_wrapper_start() == E_BMV080_OK) {
+                    bmv080_active = true;
+                }
             }
         }
 
-        int integration_ticks = (is_pro_model && bmv080_active) ? 10 : 5;
+        int integration_ticks = (is_pro_model && bmv080_active) ? 12 : 5;
         for (int tick = 0; tick < integration_ticks; tick++) {
             if (bmv080_active) {
                 bmv080_wrapper_read_data(NULL, NULL, NULL);
@@ -616,14 +659,14 @@ static void run_production_cycle(bool bme_initialized) {
         scd41_data_t scd41_data = {0};
         retry_scd41_read(&scd41_data);
 
-        float pm1 = 0, pm25 = 0, pm10 = 0;
+        bmv080_reading_t bmv080_data = {0};
         if (bmv080_active) {
-            bmv080_wrapper_read_data(&pm1, &pm25, &pm10);
-            bmv080_wrapper_deinit();
+            bmv080_wrapper_read_full(&bmv080_data);
+            bmv080_wrapper_deinit(); // Deep Sleep: handle won't survive, must close
         }
 
         network_manager_init();
-        transmit_telemetry(&scd41_data, pm1, pm25, pm10);
+        transmit_telemetry(&scd41_data, &bmv080_data);
         network_manager_deinit();
 
         if (cfg->mode == PM_MODE_5_SEC) {
@@ -740,8 +783,12 @@ static void sensor_orchestration_task(void *pvParameters) {
     /* ── Inicializar BMV080 (solo durante warmup) ─────────────────────── */
     if (is_pro_model && cfg->is_calibrating) {
         if (bmv080_wrapper_init(bmv080_dev) == E_BMV080_OK) {
-            ESP_LOGI(TAG, "BMV080 Láser encendido (Warmup)");
-            vTaskDelay(pdMS_TO_TICKS(250));
+            if (bmv080_wrapper_start() == E_BMV080_OK) {
+                ESP_LOGI(TAG, "BMV080 Láser encendido (Warmup)");
+                vTaskDelay(pdMS_TO_TICKS(250));
+            } else {
+                ESP_LOGE(TAG, "BMV080 start failed");
+            }
         } else {
             ESP_LOGE(TAG, "BMV080 init failed; disabling particulate");
             is_pro_model = false;

@@ -37,10 +37,20 @@ message TelemetryPayload {
     optional float bvoc = 24;             // ppm (Breath VOC equivalente, BSEC)
     optional float tvoc = 25;             // ppb (Total VOC equivalente, BSEC)
 
-    // === Partículas (BMV080 Láser) ===
+    // === Partículas (BMV080 Láser) — Concentración de Masa ===
     optional float pm1_0 = 15;            // ug/m3
     optional float pm2_5 = 16;            // ug/m3
     optional float pm10_0 = 17;           // ug/m3
+
+    // === Partículas (BMV080 Láser) — Concentración Numérica ===
+    optional float pm1_0_count = 26;      // particles/m3
+    optional float pm2_5_count = 27;      // particles/m3
+    optional float pm10_0_count = 28;     // particles/m3
+
+    // === Estado de Hardware del Sensor Láser ===
+    optional bool is_laser_obstructed = 29;   // true = lente sucia/bloqueada
+    optional bool is_pm_out_of_range = 30;    // true = PM2.5 > 1000 ug/m3
+    optional float laser_runtime = 31;        // seconds since measurement start
 
     // === Agua y Suelo (futuro) ===
     // optional float ph = 18;

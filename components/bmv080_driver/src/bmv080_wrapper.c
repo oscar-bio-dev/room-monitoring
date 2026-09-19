@@ -10,9 +10,9 @@ static const char *TAG = "bmv080_wrapper";
 static bmv080_handle_t bmv080_handle = NULL;
 // Handle del Bus I2C de ESP-IDF (cacheado para evadir bugs de contexto del SDK)
 static i2c_master_dev_handle_t s_bmv080_i2c_dev = NULL;
-static float                   last_pm1         = 0.0f;
-static float                   last_pm25        = 0.0f;
-static float                   last_pm10        = 0.0f;
+
+/* ── Última lectura completa (actualizada por el callback) ──────────────── */
+static bmv080_reading_t s_last_reading = {0};
 
 // Tiempo máximo de espera para transacciones I2C
 // Durante la descarga de firmware, el sensor hace clock-stretching para grabar en memoria.
@@ -137,19 +137,42 @@ static int8_t bmv080_i2c_write_16bit(bmv080_sercom_handle_t handle, uint16_t hea
     return (err == ESP_OK) ? 0 : -1;
 }
 
-// Callback de interrupción (cuando hay datos listos)
+/* ────────────────────────────────────────────────────────────────────────────
+ * Callback: captura TODOS los campos de bmv080_output_t
+ * Fuente: BST-BMV080-DS000-10, §5.2.1.3.1
+ * ──────────────────────────────────────────────────────────────────────────── */
 static void bmv080_data_ready_callback(bmv080_output_t bmv080_output, void *callback_parameters) {
     (void) callback_parameters;
+
+    /* Masa (µg/m³) */
+    s_last_reading.pm1_mass   = bmv080_output.pm1_mass_concentration;
+    s_last_reading.pm2_5_mass = bmv080_output.pm2_5_mass_concentration;
+    s_last_reading.pm10_mass  = bmv080_output.pm10_mass_concentration;
+
+    /* Conteo (particles/m³) */
+    s_last_reading.pm1_count   = bmv080_output.pm1_number_concentration;
+    s_last_reading.pm2_5_count = bmv080_output.pm2_5_number_concentration;
+    s_last_reading.pm10_count  = bmv080_output.pm10_number_concentration;
+
+    /* Estado de hardware */
+    s_last_reading.is_obstructed    = bmv080_output.is_obstructed;
+    s_last_reading.is_outside_range = bmv080_output.is_outside_measurement_range;
+    s_last_reading.runtime_sec      = bmv080_output.runtime_in_sec;
+
     if (!bmv080_output.is_obstructed) {
-        last_pm1  = bmv080_output.pm1_mass_concentration;
-        last_pm25 = bmv080_output.pm2_5_mass_concentration;
-        last_pm10 = bmv080_output.pm10_mass_concentration;
-        ESP_LOGI(TAG, "Láser BMV080: PM1=%.2f | PM2.5=%.2f | PM10=%.2f (ug/m3)", last_pm1, last_pm25, last_pm10);
+        ESP_LOGI(TAG,
+                 "Láser BMV080: PM1=%.2f | PM2.5=%.2f | PM10=%.2f (ug/m3) | "
+                 "#1=%.0f | #2.5=%.0f | #10=%.0f (/m3)",
+                 s_last_reading.pm1_mass, s_last_reading.pm2_5_mass, s_last_reading.pm10_mass, s_last_reading.pm1_count,
+                 s_last_reading.pm2_5_count, s_last_reading.pm10_count);
     } else {
-        ESP_LOGW(TAG, "Láser BMV080: Sensor obstruido o sucio");
+        ESP_LOGW(TAG, "⚠️ Láser BMV080: Sensor OBSTRUIDO (lente sucia o bloqueada)");
     }
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Init: open + reset + configure (Cold Boot only)
+ * ──────────────────────────────────────────────────────────────────────────── */
 bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle) {
     bmv080_status_code_t rslt = E_BMV080_ERROR_NULLPTR;
 
@@ -189,14 +212,14 @@ bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle)
         return rslt;
     }
 
-    // Deshabilitar detección de obstrucción para evitar falsos positivos
-    // causados por reflejos del láser en la carcasa del nodo.
-    bool obstruction_off = false;
-    rslt                 = bmv080_set_parameter(bmv080_handle, "do_obstruction_detection", &obstruction_off);
+    // Habilitar detección de obstrucción (lente sucia/bloqueada)
+    // BST-BMV080-DS000-10, §5.2.6.2: "do_obstruction_detection" = bool
+    bool obstruction_on = true;
+    rslt                = bmv080_set_parameter(bmv080_handle, "do_obstruction_detection", &obstruction_on);
     if (rslt != E_BMV080_OK) {
-        ESP_LOGW(TAG, "No se pudo deshabilitar detección de obstrucción: %d (continuando)", rslt);
+        ESP_LOGW(TAG, "No se pudo habilitar detección de obstrucción: %d (continuando)", rslt);
     } else {
-        ESP_LOGI(TAG, "BMV080 obstruction detection disabled");
+        ESP_LOGI(TAG, "BMV080 obstruction detection enabled");
     }
 
     // Obtener versión y sensor ID (Validación)
@@ -211,19 +234,41 @@ bmv080_status_code_t bmv080_wrapper_init(i2c_master_dev_handle_t i2c_dev_handle)
     }
     ESP_LOGI(TAG, "BMV080 Detectado. ID: %s", id);
 
-    // Iniciar medición continua
-    rslt = bmv080_start_continuous_measurement(bmv080_handle);
-    if (rslt != E_BMV080_OK) {
-        ESP_LOGE(TAG, "Error start_continuous_measurement: %d", rslt);
-        bmv080_close(&bmv080_handle);
-        bmv080_handle    = NULL;
-        s_bmv080_i2c_dev = NULL;
-        return rslt;
-    }
+    // Limpiar última lectura
+    memset(&s_last_reading, 0, sizeof(s_last_reading));
 
     return E_BMV080_OK;
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Start: iniciar medición continua (usar tras init o tras Light-Sleep)
+ * ──────────────────────────────────────────────────────────────────────────── */
+bmv080_status_code_t bmv080_wrapper_start(void) {
+    if (!bmv080_handle) {
+        ESP_LOGE(TAG, "Cannot start: bmv080_handle is NULL (call init first)");
+        return E_BMV080_ERROR_NULLPTR;
+    }
+
+    bmv080_status_code_t rslt = bmv080_start_continuous_measurement(bmv080_handle);
+    if (rslt != E_BMV080_OK) {
+        ESP_LOGE(TAG, "Error start_continuous_measurement: %d", rslt);
+    }
+    return rslt;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Stop: detener medición (láser a sleep < 30 µA, handle sobrevive)
+ * ──────────────────────────────────────────────────────────────────────────── */
+void bmv080_wrapper_stop(void) {
+    if (bmv080_handle) {
+        bmv080_stop_measurement(bmv080_handle);
+        ESP_LOGI(TAG, "BMV080 measurement stopped (handle retained for Light-Sleep).");
+    }
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Read (backward-compatible): solo masa
+ * ──────────────────────────────────────────────────────────────────────────── */
 int bmv080_wrapper_read_data(float *pm1_out, float *pm25_out, float *pm10_out) {
     if (!bmv080_handle) {
         return -1;
@@ -234,16 +279,36 @@ int bmv080_wrapper_read_data(float *pm1_out, float *pm25_out, float *pm10_out) {
 
     if (rslt == E_BMV080_OK) {
         if (pm1_out)
-            *pm1_out = last_pm1;
+            *pm1_out = s_last_reading.pm1_mass;
         if (pm25_out)
-            *pm25_out = last_pm25;
+            *pm25_out = s_last_reading.pm2_5_mass;
         if (pm10_out)
-            *pm10_out = last_pm10;
+            *pm10_out = s_last_reading.pm10_mass;
     }
 
     return (rslt == E_BMV080_OK) ? 0 : -1;
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Read Full: masa + conteo + estado de hardware
+ * ──────────────────────────────────────────────────────────────────────────── */
+int bmv080_wrapper_read_full(bmv080_reading_t *reading) {
+    if (!bmv080_handle || !reading) {
+        return -1;
+    }
+
+    bmv080_status_code_t rslt = bmv080_serve_interrupt(bmv080_handle, bmv080_data_ready_callback, NULL);
+
+    if (rslt == E_BMV080_OK) {
+        *reading = s_last_reading;
+    }
+
+    return (rslt == E_BMV080_OK) ? 0 : -1;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Deinit: cierre completo (solo para shutdown o error fatal)
+ * ──────────────────────────────────────────────────────────────────────────── */
 void bmv080_wrapper_deinit(void) {
     if (bmv080_handle) {
         bmv080_stop_measurement(bmv080_handle);

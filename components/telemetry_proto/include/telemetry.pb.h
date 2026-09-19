@@ -45,13 +45,27 @@ typedef struct _telemetry_TelemetryPayload {
     float bvoc; /* ppm (Breath VOC equivalente, BSEC) */
     bool  has_tvoc;
     float tvoc; /* ppb (Total VOC equivalente, BSEC) */
-    /* === Partículas (BMV080 Láser) === */
+    /* === Partículas (BMV080 Láser) — Concentración de Masa === */
     bool  has_pm1_0;
     float pm1_0; /* ug/m3 */
     bool  has_pm2_5;
     float pm2_5; /* ug/m3 */
     bool  has_pm10_0;
     float pm10_0; /* ug/m3 */
+    /* === Partículas (BMV080 Láser) — Concentración Numérica === */
+    bool  has_pm1_0_count;
+    float pm1_0_count; /* particles/m3 */
+    bool  has_pm2_5_count;
+    float pm2_5_count; /* particles/m3 */
+    bool  has_pm10_0_count;
+    float pm10_0_count; /* particles/m3 */
+    /* === Estado de Hardware del Sensor Láser === */
+    bool  has_is_laser_obstructed;
+    bool  is_laser_obstructed; /* true = lente sucia/bloqueada */
+    bool  has_is_pm_out_of_range;
+    bool  is_pm_out_of_range; /* true = PM2.5 > 1000 ug/m3 */
+    bool  has_laser_runtime;
+    float laser_runtime; /* seconds since measurement start */
     /* === Diagnósticos del Nodo === */
     bool     has_battery_mv;
     uint32_t battery_mv; /* Millivolts (ADC, futuro) */
@@ -69,12 +83,14 @@ extern "C" {
 #define telemetry_TelemetryPayload_init_default                                                                        \
     {                                                                                                                  \
         false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0,  \
-            false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0                             \
+            false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, \
+            0, false, 0, false, 0, false, 0, false, 0                                                                  \
     }
 #define telemetry_TelemetryPayload_init_zero                                                                           \
     {                                                                                                                  \
         false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0,  \
-            false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0                             \
+            false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, \
+            0, false, 0, false, 0, false, 0, false, 0                                                                  \
     }
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -94,6 +110,12 @@ extern "C" {
 #define telemetry_TelemetryPayload_pm1_0_tag 15
 #define telemetry_TelemetryPayload_pm2_5_tag 16
 #define telemetry_TelemetryPayload_pm10_0_tag 17
+#define telemetry_TelemetryPayload_pm1_0_count_tag 26
+#define telemetry_TelemetryPayload_pm2_5_count_tag 27
+#define telemetry_TelemetryPayload_pm10_0_count_tag 28
+#define telemetry_TelemetryPayload_is_laser_obstructed_tag 29
+#define telemetry_TelemetryPayload_is_pm_out_of_range_tag 30
+#define telemetry_TelemetryPayload_laser_runtime_tag 31
 #define telemetry_TelemetryPayload_battery_mv_tag 20
 #define telemetry_TelemetryPayload_sleep_cycles_tag 21
 #define telemetry_TelemetryPayload_is_calibrating_tag 22
@@ -116,6 +138,12 @@ extern "C" {
     X(a, STATIC, OPTIONAL, FLOAT, pm1_0, 15)                                                                           \
     X(a, STATIC, OPTIONAL, FLOAT, pm2_5, 16)                                                                           \
     X(a, STATIC, OPTIONAL, FLOAT, pm10_0, 17)                                                                          \
+    X(a, STATIC, OPTIONAL, FLOAT, pm1_0_count, 26)                                                                     \
+    X(a, STATIC, OPTIONAL, FLOAT, pm2_5_count, 27)                                                                     \
+    X(a, STATIC, OPTIONAL, FLOAT, pm10_0_count, 28)                                                                    \
+    X(a, STATIC, OPTIONAL, BOOL, is_laser_obstructed, 29)                                                              \
+    X(a, STATIC, OPTIONAL, BOOL, is_pm_out_of_range, 30)                                                               \
+    X(a, STATIC, OPTIONAL, FLOAT, laser_runtime, 31)                                                                   \
     X(a, STATIC, OPTIONAL, UINT32, battery_mv, 20)                                                                     \
     X(a, STATIC, OPTIONAL, UINT32, sleep_cycles, 21)                                                                   \
     X(a, STATIC, OPTIONAL, BOOL, is_calibrating, 22)
@@ -129,7 +157,7 @@ extern const pb_msgdesc_t telemetry_TelemetryPayload_msg;
 
 /* Maximum encoded size of messages (where known) */
 #define TELEMETRY_TELEMETRY_PB_H_MAX_SIZE telemetry_TelemetryPayload_size
-#define telemetry_TelemetryPayload_size 112
+#define telemetry_TelemetryPayload_size 150
 
 #ifdef __cplusplus
 } /* extern "C" */

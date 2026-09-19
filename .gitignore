@@ -28,6 +28,7 @@ env/
 
 # Temp files
 tmp/
+tmp_monitor.log
 .ledger.md
 
 # Test logs (hardware-in-the-loop)

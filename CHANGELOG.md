@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-19
+### Added
+- **BMV080 Number Concentration (BST-BMV080-DS000-10, §5.2.1.3.1):** El wrapper del sensor láser ahora extrae los 6 campos completos de `bmv080_output_t`: 3 de concentración de masa (µg/m³) y 3 de concentración numérica (particles/m³). Esto duplica la información de partículas disponible para el backend, habilitando cálculos de AQI por distribución de tamaño (EPA USA) y clasificación de salas limpias (ISO 14644).
+- **Obstruction Detection habilitada:** `bmv080_set_parameter("do_obstruction_detection", true)`. Los flags `is_obstructed` e `is_outside_measurement_range` se propagan al payload Protobuf y al log para monitoreo de salud del sensor láser en campo.
+- **Estructura `bmv080_reading_t`:** Nueva estructura de datos que encapsula 9 campos: 3 masa, 3 conteo, 2 flags de hardware y runtime del ciclo de medición.
+- **API de lifecycle BMV080 separada:** `bmv080_wrapper_start()` / `bmv080_wrapper_stop()` independientes de `init()` / `deinit()`. Permite reutilizar el handle del sensor entre ciclos de Light-Sleep sin re-descargar firmware al ASIC (~1.3s de ahorro por ciclo).
+- **Telemetría expandida (98 bytes):** 6 nuevos campos en `telemetry.proto` (tags 26-31): `pm1_0_count`, `pm2_5_count`, `pm10_0_count` (float), `is_laser_obstructed`, `is_pm_out_of_range` (bool), `laser_runtime` (float).
+
+### Changed
+- **Sub-bucle de integración BMV080:** Extendido de 10 a 12 ticks (11.4s), cumpliendo el requisito teórico del datasheet de `integration_time (10s) + 1.17s = 11.17s` para la primera lectura estable.
+- **Ciclo de vida del láser en MODE_5_MIN:** Transición de `init()/deinit()` por ciclo a `start()/stop()`. El handle sobrevive Light-Sleep (RAM retenida), eliminando el overhead de `bmv080_open() + bmv080_reset()` (~1.3s) en cada despertar.
+- **Transición Warmup→Producción:** Cambió de `bmv080_wrapper_deinit()` a `bmv080_wrapper_stop()` para preservar el handle del sensor durante la transición a MODE_5_MIN.
+- **Logs BMV080 expandidos:** Formato unificado en todos los modos mostrando masa + conteo + flags: `PM1: 44.00 | PM2.5: 96.00 | PM10: 132.00 ug/m3 | #1: 774 | #2.5: 794 | #10: 795 /m3`.
+- **Payload Protobuf:** Creció de 68 a **98 bytes** (39% del límite ESP-NOW de 250 bytes). Margen restante: 152 bytes.
+
 ## [0.7.0] - 2026-09-19
 ### Added
 - **Smart Light-Sleep Production Loop (ADR-001 Implementado):** Bucle de producción continuo basado en `esp_light_sleep_start()` con timer dinámico sincronizado con BSEC `next_call`. Reemplaza completamente al Deep Sleep como modo de producción. RAM, RTOS, heap y estado BSEC se retienen entre ciclos sin serialización.

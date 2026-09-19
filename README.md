@@ -18,7 +18,7 @@ El firmware ha sido diseñado bajo los estándares empresariales más estrictos 
 |-----------|--------|----------|----------|
 | **Bosch BME688** | MOX + BSEC 3.0 | I2C (0x76) | IAQ, Temperatura, Humedad, Presión, VOCs |
 | **Sensirion SCD41** | NDIR fotoacústico | I2C (0x62) | CO₂ (400–5000 ppm), T, H |
-| **Bosch BMV080** | Láser óptico | I2C (0x57) | PM1.0, PM2.5, PM10 (µg/m³) |
+| **Bosch BMV080** | Láser óptico | I2C (0x57) | PM1.0, PM2.5, PM10 (µg/m³ + particles/m³), Obstruction |
 | **RV-1805-C3** | RTC hardware ±2 ppm | I2C (0x69) | Timestamp de precisión |
 | **MicroSD** (onboard) | FATFS on-demand | SPI (VSPI) | Store-and-Forward (Caja Negra) |
 | **ESP32-D0WD-V3** | Xtensa dual-core, rev 3.1 | — | MCU + radio ESP-NOW |
@@ -28,8 +28,8 @@ El firmware ha sido diseñado bajo los estándares empresariales más estrictos 
 - **Core 1 (App Core):** Tareas críticas ancladas vía FreeRTOS dedicadas a los drivers I2C y temporización de sensores láser.
 
 ### Carga Útil (Payload) y Sensor Fusion
-El nodo transmite una trama Protobuf (`telemetry.proto`) ultra-optimizada de **68 bytes** vía ESP-NOW. Gracias a la sinergia *Sensor Fusion*, el payload integra:
-- **Bosch BMV080:** PM1.0, PM2.5, PM10 (µg/m³)
+El nodo transmite una trama Protobuf (`telemetry.proto`) ultra-optimizada de **98 bytes** vía ESP-NOW. Gracias a la sinergia *Sensor Fusion*, el payload integra:
+- **Bosch BMV080:** PM1.0, PM2.5, PM10 en concentración de masa (µg/m³) y concentración numérica (particles/m³), flags de obstrucción y rango, runtime del láser.
 - **Sensirion SCD41:** CO₂ real fotoacústico (ppm) con compensación de presión atmosférica inyectada dinámicamente.
 - **Bosch BME688 (BSEC 3.0):** eCO₂ (CO₂ Equivalente), IAQ (Índice de Calidad del Aire), Temperatura, Humedad, Presión barométrica y Resistencia de Gas.
 
@@ -103,7 +103,7 @@ Este repositorio implementa tácticas críticas para hardware desplegado en camp
 4. **Integridad de mediciones:** Las tres palabras de la trama SCD41 se validan mediante CRC-8 antes de convertirlas a CO₂, temperatura y humedad. Las operaciones SCD41 se reintentan hasta tres veces y los fallos de inicialización de cada sensor deshabilitan únicamente esa medición.
 5. **Sincronización de Tiempo Real (RTC Híbrido RV-1805):** En Cold Boot, el sistema sincroniza `gettimeofday()` contra el chip de hardware RV-1805 (±2 ppm). El resto del ciclo confía en el reloj interno anclado al temporizador RTC profundo (`CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y`), logrando control de tiempo milimétrico sin penalizar el bus I2C ni consumir batería.
 6. **Anticolisión I2C (Clock-Stretching):** Implementación de retardos tácticos mecánicos estables entre la excitación del escáner láser BMV080 (250ms), el disparo del sensor NDIR SCD41 (50ms) y la ráfaga de datos del BME688. Además, el láser BMV080 se sondea mediante *fast-polling* (100ms) durante el calentamiento y rutinas de purgado (15-buffer flush) para evitar fallos catastróficos por desbordamiento de su FIFO interno y bloqueos de bus (`I2C software timeout`).
-7. **Telemetría ESP-NOW y Caja Negra (Store-and-Forward):** La transmisión de datos opera vía ESP-NOW (*peer-to-peer*) hacia el Gateway para minimizar el tiempo de radio encendida. Si el Gateway no emite confirmación (ACK), el sistema inicializa *On-Demand* el lector MicroSD (bus VSPI), empaqueta la trama ultra-optimizada de **68 bytes** con **Nanopb** (Protobuf), la anexa a un archivo binario y apaga el bus SPI por completo. Al recuperar conexión, la "Caja Negra" se vacía dinámicamente enviando lotes máximos de 15 registros para prevenir caídas de tensión (Brown-out).
+7. **Telemetría ESP-NOW y Caja Negra (Store-and-Forward):** La transmisión de datos opera vía ESP-NOW (*peer-to-peer*) hacia el Gateway para minimizar el tiempo de radio encendida. Si el Gateway no emite confirmación (ACK), el sistema inicializa *On-Demand* el lector MicroSD (bus VSPI), empaqueta la trama ultra-optimizada de **98 bytes** con **Nanopb** (Protobuf), la anexa a un archivo binario y apaga el bus SPI por completo. Al recuperar conexión, la "Caja Negra" se vacía dinámicamente enviando lotes máximos de 15 registros para prevenir caídas de tensión (Brown-out).
 
 ---
 
@@ -111,7 +111,7 @@ Este repositorio implementa tácticas críticas para hardware desplegado en camp
 
 En cada ciclo de recolección, el firmware registra los motivos de despertar y reinicio, heap libre y el mínimo de stack disponible de la tarea de sensores. Smart Light-Sleep preserva el contexto completo del sistema (I²C, FreeRTOS, BSEC) entre mediciones, garantizando que los diagnósticos reflejen el estado acumulado real del dispositivo.
 
-El BMV080 se integra exclusivamente a través de `bmv080_driver`, que encapsula el SDK binario de Bosch. Las transferencias de sus callbacks se validan y limitan a 512 palabras para proteger el heap ante datos anómalos del SDK.
+El BMV080 se integra exclusivamente a través de `bmv080_driver`, que encapsula el SDK binario de Bosch. El callback captura los 6 campos de `bmv080_output_t` (masa + conteo) y los flags de hardware (`is_obstructed`, `is_outside_measurement_range`). Las transferencias I2C se validan y limitan a 512 palabras para proteger el heap ante datos anómalos del SDK. La detección de obstrucción está habilitada para monitoreo de salud del sensor en campo.
 
 ---
 
@@ -187,6 +187,7 @@ Este proyecto sigue políticas estrictas de gobierno:
 - [x] **Fase 3:** Telemetría Resiliente ESP-NOW y "Caja Negra" Store-and-Forward (MicroSD SPI) con Nanopb.
 - [x] **Fase 3b:** Auditoría BSEC Deep Sleep — ADR-001 aprobado. Pivot a Smart Light-Sleep. Ver [`docs/ADR-001-Power-Management-BSEC.md`](docs/ADR-001-Power-Management-BSEC.md).
 - [x] **Fase 3c:** Smart Light-Sleep implementado (2 modos: 5s Continuous / 5min ULP con `esp_light_sleep_start()` y event loop dinámico BSEC-synced).
+- [x] **Fase 3d:** BMV080 Industrial Optimization — Number concentration (particles/m³), obstruction detection, laser lifecycle `start()/stop()`, payload expandido a 98 bytes.
 - [ ] **Fase 4:** Gateway Criptográfico Edge (ESP32-P4) con conectividad a Google Cloud.
 - [ ] **Fase 5:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
 
