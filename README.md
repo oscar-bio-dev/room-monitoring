@@ -19,7 +19,7 @@ El firmware ha sido diseñado bajo los estándares empresariales más estrictos 
 | **Bosch BME688** | MOX + BSEC 3.0 | I2C (0x76) | IAQ, Temperatura, Humedad, Presión, VOCs |
 | **Sensirion SCD41** | NDIR fotoacústico | I2C (0x62) | CO₂ (400–5000 ppm), T, H |
 | **Bosch BMV080** | Láser óptico | I2C (0x57) | PM1.0, PM2.5, PM10 (µg/m³) |
-| **RV-1805-C3** | RTC hardware ±2 ppm | I2C Qwiic | Timestamp de precisión |
+| **RV-1805-C3** | RTC hardware ±2 ppm | I2C (0x69) | Timestamp de precisión |
 | **MicroSD** (onboard) | FATFS on-demand | SPI (VSPI) | Store-and-Forward (Caja Negra) |
 | **ESP32-D0WD-V3** | Xtensa dual-core, rev 3.1 | — | MCU + radio ESP-NOW |
 
@@ -48,22 +48,18 @@ stateDiagram-v2
 
     Cold_Boot --> Warmup
 
-    state Warmup {
-        note right of Warmup
-            12 pulsos a 1 Hz (~60s)
-            is_calibrating = true
-            IAQ Accuracy: 0 → 1
-        end note
-    }
+    note right of Warmup
+        12 pulsos a 1 Hz (~60s)
+        is_calibrating = true
+        IAQ Accuracy: 0 → 1
+    end note
 
     Warmup --> BSEC_Transition: Pulso 12/12
 
-    state BSEC_Transition {
-        note right of BSEC_Transition
-            Continuous (1 Hz) → ULP (300s)
-            bsec_set_sample_rate(ULP)
-        end note
-    }
+    note right of BSEC_Transition
+        Continuous (1 Hz) → ULP (300s)
+        bsec_set_sample_rate(ULP)
+    end note
 
     BSEC_Transition --> Production
 
@@ -75,13 +71,13 @@ stateDiagram-v2
         Transmit --> Fallback: ACK fail?
     }
 
-    state "Smart Light-Sleep" as Sleep {
-        note right of Sleep
-            Mode 5s: ~1s ticks (BSEC 1Hz)
-            Mode 5min: ~295s (BSEC ULP)
-            RAM + RTOS + BSEC retenidos
-        end note
-    }
+    state "Smart Light-Sleep" as Sleep
+
+    note right of Sleep
+        Mode 5s: ~1s ticks (BSEC 1Hz)
+        Mode 5min: ~295s (BSEC ULP)
+        RAM + RTOS + BSEC retenidos
+    end note
 
     Production --> Sleep
     Sleep --> Production: Timer Wakeup

@@ -248,7 +248,7 @@ El código de Deep Sleep existente representa un trabajo significativo de ingeni
 
 ### A. Logs forenses completos
 
-Ver [`/home/ecotech/Projects/esp-idf/log2.md`](file:///home/ecotech/Projects/esp-idf/log2.md) — 1056 líneas que documentan:
+Ver [logs/deep_sleep_log.md](logs/deep_sleep_log.md) — 1056 líneas que documentan:
 - Fase 1 completa (12 pulsos Continuous, IAQ escalando de 50.0 a 57.6, Accuracy de 0 a 1)
 - Transición CONTINUOUS → ULP y `mark_state_stale()`
 - Primer ciclo ULP (anchor point, `n_outputs=0`, sleep correcto de 279s)
