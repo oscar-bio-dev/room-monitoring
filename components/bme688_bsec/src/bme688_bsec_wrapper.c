@@ -9,18 +9,32 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_attr.h"
 #include <stdlib.h>
 #include "rv1805_wrapper.h"
 
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
+#include "esp_attr.h"
+#endif
+
 static const char *TAG = "bme688_bsec";
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Estado persistente BSEC
+ *
+ * Deep Sleep (legacy): RTC_DATA_ATTR para sobrevivir al reboot.
+ * Light-Sleep: variables estáticas normales (RAM retenida).
+ * ──────────────────────────────────────────────────────────────────────────── */
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
 RTC_DATA_ATTR static uint8_t rtc_bsec_state[BSEC_MAX_STATE_BLOB_SIZE];
 RTC_DATA_ATTR static bool    rtc_bsec_state_valid         = false;
 RTC_DATA_ATTR static bool    rtc_bsec_ulp_established     = false;
-RTC_DATA_ATTR static int64_t rtc_bsec_next_measurement_ns = 0; // próxima medición derivada de 1/rate
+RTC_DATA_ATTR static int64_t rtc_bsec_next_measurement_ns = 0;
+#endif
 
-static float s_current_sample_rate = 0.0f; // rate activo (LP=0.333, ULP=0.003333)
+static float s_current_sample_rate = 0.0f;
+
+/* Último next_call nativo de BSEC (para Light-Sleep timer dinámico) */
+static int64_t s_last_bsec_next_call_ns = 0;
 
 static struct bme68x_dev       bme_dev;
 static i2c_master_dev_handle_t rtc_dev;
@@ -119,8 +133,9 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_h
         return -1;
     }
 
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
+    /* ── Deep Sleep (legacy): restaurar state blob desde RTC ─────────────── */
     if (rtc_bsec_state_valid && rtc_bsec_ulp_established) {
-        /* Estado proveniente de un ciclo ULP real → restaurar normalmente */
         uint8_t               work_buffer[BSEC_MAX_WORKBUFFER_SIZE];
         bsec_library_return_t res =
             bsec_set_state(bsec_instance, rtc_bsec_state, BSEC_MAX_STATE_BLOB_SIZE, work_buffer, sizeof(work_buffer));
@@ -131,15 +146,15 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_h
             rtc_bsec_state_valid = false;
         }
     } else if (rtc_bsec_state_valid && !rtc_bsec_ulp_established) {
-        /* Estado proveniente del Warmup CONTINUOUS → NO restaurar.
-         * El blob de CONTINUOUS confunde al filtro de Kalman cuando se usa
-         * con suscripciones ULP, causando n_outputs=0 indefinido.
-         * BSEC arrancará fresco con ULP. El IAQ accuracy reinicia en 0
-         * pero T/H/P/Gas son válidos desde el primer ciclo. */
         ESP_LOGW(TAG, "⚠️ BSEC state from CONTINUOUS warmup → skipping restore for clean ULP start");
     } else {
         ESP_LOGI(TAG, "BSEC: No previous state to restore (Cold Boot).");
     }
+#else
+    /* ── Light-Sleep: bsec_instance vive en heap, no hay nada que restaurar.
+     *    Entre ciclos de Light-Sleep, el heap se retiene completamente. ──── */
+    ESP_LOGI(TAG, "BSEC: Light-Sleep mode — instance lives in heap (no serialization needed).");
+#endif
 
     s_current_sample_rate = sample_rate;
     ESP_LOGI(TAG, "BSEC configuring with sample rate: %f (period: %d s)", sample_rate, (int) (1.0f / sample_rate));
@@ -147,9 +162,10 @@ int8_t bme688_bsec_init(i2c_master_dev_handle_t i2c_dev_handle, i2c_master_dev_h
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Reconfigura BSEC en runtime (ej. Fase 1 → Fase 2)
+ * Reconfigura BSEC en runtime (ej. Warmup → Producción)
  * ──────────────────────────────────────────────────────────────────────────── */
 int8_t bme688_bsec_set_sample_rate(float sample_rate) {
+    s_current_sample_rate = sample_rate;
     ESP_LOGI(TAG, "BSEC reconfiguring sample rate to %f", sample_rate);
     return configure_bsec_subscriptions(sample_rate);
 }
@@ -175,7 +191,10 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
     if (bsec_status < BSEC_OK)
         return -1;
 
-    ESP_LOGW(TAG, "🔍 BSEC timestamp: %lld ns (%lld s) | trigger=%d | next_call=%lld ns (native +%lld s)", curr_time_ns,
+    /* Guardar next_call para el timer dinámico de Light-Sleep */
+    s_last_bsec_next_call_ns = bme_settings.next_call;
+
+    ESP_LOGD(TAG, "🔍 BSEC timestamp: %lld ns (%lld s) | trigger=%d | next_call=%lld ns (in +%lld s)", curr_time_ns,
              curr_time_ns / 1000000000LL, bme_settings.trigger_measurement, bme_settings.next_call,
              (bme_settings.next_call - curr_time_ns) / 1000000000LL);
 
@@ -200,7 +219,7 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
         heatr_conf.heatr_dur_prof  = &bme_settings.heater_duration_profile[0];
         heatr_conf.profile_len     = bme_settings.heater_profile_len;
 
-        ESP_LOGW(TAG, "🔧 Heater config: enable=%d temp=%d dur=%d op_mode=%d prof_len=%d", heatr_conf.enable,
+        ESP_LOGD(TAG, "🔧 Heater config: enable=%d temp=%d dur=%d op_mode=%d prof_len=%d", heatr_conf.enable,
                  heatr_conf.heatr_temp, heatr_conf.heatr_dur, bme_settings.op_mode, heatr_conf.profile_len);
 
         int8_t heatr_rslt = bme68x_set_heatr_conf(bme_settings.op_mode, &heatr_conf, &bme_dev);
@@ -295,66 +314,45 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
                 }
             }
 
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
             /* ── FALLBACK CRÍTICO: Anchor Point post-Deep-Sleep ──────────
              * Cuando BSEC restaura un state blob, la primera medición sirve
              * como "anchor point" para recalibrar el filtro de Kalman.
              * bsec_do_steps() retorna n_outputs=0 (sin datos procesados),
-             * pero el hardware SÍ midió (n_fields > 0).
-             *
-             * Sin este fallback, current_* (variables .bss reseteadas a 0
-             * tras Deep Sleep) se copiarían al caller → datos basura.
-             *
-             * Usamos los datos RAW del sensor directamente:
-             * - T, H, P, Gas: perfectamente válidos (datos del ADC)
-             * - IAQ = 0, accuracy = 0: correcto (BSEC no puede calcular)
-             * ──────────────────────────────────────────────────────────── */
+             * pero el hardware SÍ midió (n_fields > 0). */
             if (n_outputs == 0 && n_fields > 0) {
                 ESP_LOGW(TAG, "⚓ BSEC anchor point: n_outputs=0, using RAW sensor fallback");
                 current_temp         = data[0].temperature;
                 current_hum          = data[0].humidity;
-                current_pressure     = data[0].pressure / 100.0f; // Pa → hPa
+                current_pressure     = data[0].pressure / 100.0f;
                 current_gas_res      = data[0].gas_resistance;
                 current_iaq          = 0.0f;
                 current_iaq_accuracy = 0;
             }
 
-            /* ── Persistir estado BSEC SIEMPRE (incluso con n_outputs=0) ──
-             * Si no persistimos el anchor point, el segundo ciclo
-             * tampoco recibirá outputs y quedamos en un loop de ceros. */
+            /* ── Persistir estado BSEC en RTC (incluso con n_outputs=0) ── */
             uint8_t               work_buffer[BSEC_MAX_WORKBUFFER_SIZE];
             uint32_t              actual_len = 0;
             bsec_library_return_t res = bsec_get_state(bsec_instance, 0, rtc_bsec_state, BSEC_MAX_STATE_BLOB_SIZE,
                                                        work_buffer, sizeof(work_buffer), &actual_len);
             if (res == BSEC_OK) {
-                rtc_bsec_state_valid = true;
-                /* CRÍTICO: Si logramos extraer el state blob en Fase 2, significa que
-                 * ya establecimos el anclaje ULP, incluso si n_outputs es 0 (anchor point).
-                 * DEBE ser true para que el siguiente boot restaure este anclaje.
-                 * Sin esto, cada ciclo arranca fresh → n_outputs=0 → amnesia infinita. */
+                rtc_bsec_state_valid     = true;
                 rtc_bsec_ulp_established = true;
                 ESP_LOGI(TAG, "BSEC state persisted (ULP-established=true, n_outputs=%u)", n_outputs);
             } else {
                 ESP_LOGW(TAG, "Failed to persist BSEC state: %d", res);
             }
 
-            /* ── Calcular PRÓXIMA MEDICIÓN desde el período de suscripción ──
-             * BSEC 3.0 ULP: next_call es SIEMPRE +3s (intervalo de polling
-             * interno), NO el intervalo de medición. El período real de
-             * medición se deriva de 1/sample_rate:
-             *   ULP (0.003333 Hz) → 1/0.003333 = 300s
-             *   LP  (0.333 Hz)   → 1/0.333    = 3s
-             * Usamos el timestamp de la medición + período como base
-             * para el cálculo dinámico de Deep Sleep. */
+            /* ── Calcular PRÓXIMA MEDICIÓN desde 1/sample_rate ──────────── */
             if (s_current_sample_rate > 0.0f) {
                 int64_t period_ns            = (int64_t) (1.0 / (double) s_current_sample_rate * 1000000000.0);
                 rtc_bsec_next_measurement_ns = curr_time_ns + period_ns;
                 ESP_LOGI(TAG, "📊 BSEC next measurement: in %lld s (period=%lld s, rate=%.6f Hz)",
                          period_ns / 1000000000LL, period_ns / 1000000000LL, s_current_sample_rate);
             }
-
-            /* Log diagnóstico: next_call nativo de BSEC (siempre ~3s) */
-            ESP_LOGD(TAG, "BSEC native next_call: +%lld s (polling interval, not measurement)",
-                     (bme_settings.next_call - curr_time_ns) / 1000000000LL);
+#endif
+            /* Log diagnóstico: next_call nativo de BSEC */
+            ESP_LOGD(TAG, "BSEC native next_call: +%lld s", (bme_settings.next_call - curr_time_ns) / 1000000000LL);
         }
 
         if (iaq)
@@ -443,11 +441,26 @@ int8_t bme688_raw_forced_read(float *temperature, float *humidity, float *pressu
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Marca el state blob como "stale" (proveniente de CONTINUOUS warmup).
- * Llamar al final del Warmup, después de bme688_bsec_set_sample_rate(ULP).
+ * Retorna el timestamp (ns) de la próxima medición BSEC.
  *
- * Esto causa que bme688_bsec_init() en el siguiente boot (primer ciclo ULP)
- * NO restaure el blob, evitando la confusión del filtro de Kalman.
+ * Light-Sleep: retorna next_call nativo de bsec_sensor_control().
+ *   Con RAM retenida, BSEC mantiene su estado temporal completo y
+ *   next_call refleja el verdadero próximo momento de medición.
+ *
+ * Deep Sleep (legacy): retorna measurement_timestamp + 1/sample_rate.
+ *   Porque next_call nativo es siempre +3s (polling interno inútil).
+ * ──────────────────────────────────────────────────────────────────────────── */
+int64_t bme688_bsec_get_next_call_ns(void) {
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
+    return rtc_bsec_next_measurement_ns;
+#else
+    return s_last_bsec_next_call_ns;
+#endif
+}
+
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
+/* ────────────────────────────────────────────────────────────────────────────
+ * Deep Sleep legacy: marca state blob como stale y resetea RTC state.
  * ──────────────────────────────────────────────────────────────────────────── */
 void bme688_bsec_mark_state_stale(void) {
     rtc_bsec_ulp_established = false;
@@ -455,23 +468,6 @@ void bme688_bsec_mark_state_stale(void) {
                   "Next init will start fresh.");
 }
 
-/* ──────────────────────────────────────────────────────────────────────────────
- * Retorna el timestamp (ns) de la próxima medición BSEC.
- * Derivado de: measurement_timestamp + (1/sample_rate) * 1e9
- * NOTA: NO es bsec_bme_settings.next_call (que es +3s polling).
- *
- * Usar para calcular dinámicamente el tiempo de Deep Sleep:
- *   sleep_us = (next_measurement_ns - now_ns) / 1000 - 6_000_000
- * ────────────────────────────────────────────────────────────────────────────── */
-int64_t bme688_bsec_get_next_call_ns(void) {
-    return rtc_bsec_next_measurement_ns;
-}
-
-/* ────────────────────────────────────────────────────────────────────────────
- * Resetea TODO el estado BSEC en RTC SRAM.
- * Llamar en Cold Boot (power-on / flash) para evitar flags stale de
- * firmware anterior.
- * ──────────────────────────────────────────────────────────────────────────── */
 void bme688_bsec_reset_rtc_state(void) {
     rtc_bsec_state_valid         = false;
     rtc_bsec_ulp_established     = false;
@@ -479,3 +475,4 @@ void bme688_bsec_reset_rtc_state(void) {
     memset(rtc_bsec_state, 0, sizeof(rtc_bsec_state));
     ESP_LOGW(TAG, "🔄 BSEC RTC state RESET (cold boot / fresh flash)");
 }
+#endif

@@ -19,6 +19,7 @@ static EventGroupHandle_t esp_now_event_group;
 #define SEND_FAIL_BIT BIT1
 
 static uint8_t gateway_mac[6] = {0};
+static bool    s_initialized  = false;
 
 /**
  * @brief Convierte un string MAC "AA:BB:CC:DD:EE:FF" a un arreglo uint8_t[6].
@@ -44,6 +45,11 @@ static void esp_now_send_cb(const uint8_t *mac_addr, esp_now_send_status_t statu
 }
 
 void network_manager_init(void) {
+    if (s_initialized) {
+        ESP_LOGW(TAG, "Already initialized, skipping");
+        return;
+    }
+
     if (!esp_now_event_group) {
         esp_now_event_group = xEventGroupCreate();
     }
@@ -103,6 +109,26 @@ void network_manager_init(void) {
     if (esp_now_add_peer(&peer_info) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add ESP-NOW peer");
     }
+
+    s_initialized = true;
+    ESP_LOGI(TAG, "Network manager initialized (Wi-Fi + ESP-NOW ready)");
+}
+
+esp_err_t network_manager_wake(void) {
+    esp_err_t err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Wi-Fi wake failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    /* Re-establecer canal (se pierde tras wifi_stop/start) */
+    ESP_ERROR_CHECK(esp_wifi_set_channel(CONFIG_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE));
+    ESP_LOGD(TAG, "Wi-Fi radio awake (channel %d)", CONFIG_ESPNOW_CHANNEL);
+    return ESP_OK;
+}
+
+void network_manager_sleep(void) {
+    esp_wifi_stop();
+    ESP_LOGD(TAG, "Wi-Fi radio stopped (Light-Sleep safe)");
 }
 
 esp_err_t network_manager_send(const uint8_t *payload, size_t len) {
@@ -124,8 +150,11 @@ esp_err_t network_manager_send(const uint8_t *payload, size_t len) {
     }
 }
 
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
 void network_manager_deinit(void) {
     esp_now_deinit();
     esp_wifi_stop();
     esp_wifi_deinit();
+    s_initialized = false;
 }
+#endif

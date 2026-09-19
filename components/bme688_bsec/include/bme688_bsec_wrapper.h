@@ -35,25 +35,12 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
                             float *gas_resistance);
 
 /**
- * @brief Marca el state blob actual como "stale" (proveniente de CONTINUOUS mode).
+ * @brief Retorna el timestamp (ns) de la próxima medición BSEC.
  *
- * Llamar al final del Warmup, justo después de bme688_bsec_set_sample_rate(ULP).
- * Esto evita que el primer ciclo ULP post-Deep-Sleep restaure un blob de CONTINUOUS,
- * lo cual causaría n_outputs=0 indefinido por confusión del filtro de Kalman.
- */
-void bme688_bsec_mark_state_stale(void);
-
-/**
- * @brief Resetea TODO el estado BSEC en RTC SRAM.
- *        Llamar en Cold Boot (power-on / flash) para invalidar estado stale.
- */
-void bme688_bsec_reset_rtc_state(void);
-
-/**
- * @brief Retorna el último timestamp next_call (ns) de bsec_sensor_control().
+ * En Light-Sleep: retorna bsec_sensor_control().next_call directo (confiable
+ * porque el filtro de Kalman nunca pierde contexto).
  *
- * Usar para calcular dinámicamente el tiempo de Deep Sleep:
- *   sleep_us = (next_call_ns - now_ns - overhead_ns) / 1000
+ * En Deep Sleep (legacy): retorna measurement_time + 1/sample_rate.
  *
  * @return int64_t Timestamp en nanosegundos del próximo muestreo BSEC.
  */
@@ -66,6 +53,25 @@ int64_t bme688_bsec_get_next_call_ns(void);
  * @return int8_t 0 (Éxito) o -1 (Error)
  */
 int8_t bme688_raw_forced_read(float *temperature, float *humidity, float *pressure, float *gas_resistance);
+
+#ifdef CONFIG_ENABLE_DEEP_SLEEP
+/**
+ * @brief Marca el state blob actual como "stale" (proveniente de CONTINUOUS mode).
+ *        Solo necesario en Deep Sleep (legacy v2.0).
+ */
+void bme688_bsec_mark_state_stale(void);
+
+/**
+ * @brief Resetea TODO el estado BSEC en RTC SRAM.
+ *        Solo necesario en Deep Sleep (legacy v2.0).
+ */
+void bme688_bsec_reset_rtc_state(void);
+#else
+/* En Light-Sleep, estas funciones son no-ops porque el estado
+ * vive en RAM estática y no necesita serialización/restauración. */
+static inline void bme688_bsec_mark_state_stale(void) {}
+static inline void bme688_bsec_reset_rtc_state(void) {}
+#endif
 
 #ifdef __cplusplus
 }
