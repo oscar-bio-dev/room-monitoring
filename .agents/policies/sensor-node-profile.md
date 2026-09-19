@@ -47,7 +47,7 @@
 - El filtro de Kalman converge naturalmente sin interrupciones de contexto.
 - La memoria RTC Slow sigue disponible para `boot_counter`, `node_config_t` y otros datos ligeros.
 
-**Deep Sleep (v2.0, encapsulado bajo `CONFIG_ENABLE_DEEP_SLEEP_V2`):**
+**Deep Sleep (v2.0, encapsulado bajo `CONFIG_ENABLE_DEEP_SLEEP`):**
 - Requiere persistir ~4 KB de State Blob en `RTC_DATA_ATTR` mediante `bsec_get_state()`.
 - **Limitación documentada (ADR-001):** BSEC ULP (0.003333 Hz) produce `n_outputs=0` indefinidamente tras Deep Sleep del ESP32. El desfase temporal del boot (~7s + jitter del oscilador RTC ±5%) viola la tolerancia interna del filtro de Kalman.
 - El bug de corrupción de RTC en alta temperatura (ar2024-005) **NO afecta** al ESP32 clásico (solo ESP32-C3/S3).
@@ -145,17 +145,18 @@ El esquema canónico del ecosistema es `TelemetryPayload` definido en:
                              ▼
               ┌──────────────────────────────┐
               │  TRANSICIÓN BSEC               │
-              │  Continuous (1Hz) → ULP/LP     │
-              │  mark_state_stale()            │
+              │  Continuous (1Hz) → ULP (300s) │
+              │  bsec_set_sample_rate(ULP)     │
               └──────────────┬───────────────┘
                              │
                              ▼
         ┌─────►┌──────────────────────────────┐
         │       │  FASE 2: PRODUCCIÓN           │
-        │       │  • BSEC ULP/LP measure         │
-        │       │  • SCD41 single-shot (5s)      │
+        │       │  • BSEC ULP/CONT measure      │
+        │       │  • SCD41 single-shot/periodic  │
         │       │  • BMV080 duty-cycle            │
-        │       │  • ESP-NOW TX                   │
+        │       │  • Wi-Fi Wake → ESP-NOW TX     │
+        │       │  • Wi-Fi Sleep                  │
         │       │  • SD fallback si ACK fail      │
         │       └──────────────┬───────────────┘
         │                      │
@@ -163,9 +164,8 @@ El esquema canónico del ecosistema es `TelemetryPayload` definido en:
         │       ┌──────────────────────────────┐
         │       │  LIGHT-SLEEP (Timer Wakeup)   │
         │       │  Duración según modo:          │
-        │       │  Mode 0: ~5s   (LP BSEC)      │
-        │       │  Mode 1: ~55s  (LP BSEC)      │
-        │       │  Mode 2: ~293s (ULP BSEC)     │
+        │       │  Mode 5s:   ~1s ticks (1Hz)   │
+        │       │  Mode 5min: ~295s (ULP BSEC)  │
         │       │  RAM + RTOS + BSEC retenidos   │
         │       └──────────────┬───────────────┘
         │                      │ Timer Wakeup
@@ -175,7 +175,7 @@ El esquema canónico del ecosistema es `TelemetryPayload` definido en:
 > **Nota histórica:** La arquitectura original usaba Deep Sleep como ciclo maestro
 > (WAKE_A → Light-Sleep 4.85s → WAKE_B → Deep Sleep). Este diseño fue abandonado
 > tras la auditoría de BSEC (ADR-001). El código de Deep Sleep se preserva bajo
-> `#ifdef CONFIG_ENABLE_DEEP_SLEEP_V2`.
+> `#ifdef CONFIG_ENABLE_DEEP_SLEEP`.
 
 ## §6. Checks de CI Específicos del Nodo
 
@@ -208,7 +208,7 @@ Los siguientes directorios MUST excluirse de `clang-format` y hooks de estilo:
 | R7 | Un solo desarrollador → bus factor = 1 | 🟡 Medio | Documentación exhaustiva, ADRs, gobernanza | 🔄 En progreso |
 | R8 | ADC de batería no implementado | 🟡 Medio | Campo `battery_mv` presente pero siempre 0 | ⏳ Pendiente |
 | R9 | Provisioning de llaves ESP-NOW sin UI | 🟡 Medio | Kconfig para desarrollo; NVS encriptado para producción | ⏳ Pendiente |
-| R10 | BSEC ULP incompatible con Deep Sleep ESP32 (`n_outputs=0` indefinido) | 🔴 Crítico | Pivot a Smart Light-Sleep (ADR-001). Código Deep Sleep encapsulado bajo `CONFIG_ENABLE_DEEP_SLEEP_V2`. | ✅ Mitigado |
+| R10 | BSEC ULP incompatible con Deep Sleep ESP32 (`n_outputs=0` indefinido) | 🔴 Crítico | Pivot a Smart Light-Sleep (ADR-001). Código Deep Sleep encapsulado bajo `CONFIG_ENABLE_DEEP_SLEEP`. Primera prueba HIL exitosa: IAQ Acc=2 con 286s Light-Sleep. | ✅ Mitigado |
 
 ## §8. Roadmap de Hardening de Seguridad
 

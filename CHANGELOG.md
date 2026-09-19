@@ -6,19 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.7.0] - 2026-09-19
 ### Added
-- **ADR-001 (Architecture Decision Record):** Documento formal en `docs/ADR-001-Power-Management-BSEC.md` que registra el fallo del Deep Sleep con BSEC 3.0 ULP, la evaluación del ULP-FSM del ESP32, y la decisión de pivotar a Smart Light-Sleep.
-- **Cálculo Dinámico de Deep Sleep (BSEC-synced):** El intervalo de Deep Sleep se calcula en tiempo real desde `1/sample_rate` del modo BSEC activo, en lugar de usar el valor fijo de `next_call` (+3s polling interno). Produce ciclos de 279s + 21s activo = 300s exactos para ULP.
-- **Fallback RAW en Anchor Point:** Cuando BSEC retorna `n_outputs=0` (primer ciclo ULP), el wrapper extrae T/H/P/Gas directamente del BME688 y los reporta como fallback con `IAQ=0.0, Accuracy=0`.
-- **Persistencia Incondicional del State Blob:** `rtc_bsec_ulp_established` se marca `true` siempre que `bsec_get_state()` retorna `BSEC_OK`, independientemente de `n_outputs`, rompiendo el bucle de "amnesia infinita".
-- **Logs de diagnóstico BSEC:** Timestamps, heater config, `next_call` nativo, período derivado y deep sleep dinámico visibles en cada ciclo.
+- **Smart Light-Sleep Production Loop (ADR-001 Implementado):** Bucle de producción continuo basado en `esp_light_sleep_start()` con timer dinámico sincronizado con BSEC `next_call`. Reemplaza completamente al Deep Sleep como modo de producción. RAM, RTOS, heap y estado BSEC se retienen entre ciclos sin serialización.
+- **Event Loop Dinámico (2 Modos):** El bucle principal actúa como despachador dinámico que calcula el sleep time basándose en `MIN(next_bsec_call, next_scd41_read)`:
+  - `MODE_5_SEC` (Continuo): BSEC Continuous 1Hz + SCD41 Periodic (~5s). Ticks de Light-Sleep ~1s. TX cada 5 ciclos. IAQ completo en tiempo real.
+  - `MODE_5_MIN` (Batería): BSEC ULP 300s + SCD41 Single-Shot. Light-Sleep dinámico ~295s (BSEC-synced). TX por ciclo.
+- **SCD41 Periodic Measurement API:** Nuevas funciones `scd41_start_periodic_measurement()` (0x21B1), `scd41_stop_periodic_measurement()` (0x3F86) y `scd41_get_data_ready()` (0xE4B8) para MODE_5_SEC.
+- **Network Manager 3-API Pattern:** `init()` (una vez en boot), `wake()` (esp_wifi_start, ~5ms pre-TX), `sleep()` (esp_wifi_stop pre-Light-Sleep). Ahorra ~40 KB de heap por ciclo vs el patrón init/deinit anterior.
+- **BSEC IAQ en todos los modos:** Eliminado `BME_MODE_RAW_FORCED`. Todos los modos de producción usan BSEC (Continuous o ULP) para datos de IAQ completo.
 
 ### Changed
-- **Modos de Energía (refactor conceptual):** Los 3 modos (5s/1min/5min) dejan de depender de Deep Sleep para su ciclo largo. La implementación de Light-Sleep está pendiente del refactor post-ADR-001.
-- El campo `is_calibrating` ahora se basa exclusivamente en los 12 pulsos de warmup (Fase 1), no en el estado post-Deep-Sleep.
+- **Simplificación a 2 modos de energía:** Eliminado `PM_MODE_1_MIN`. El sistema opera solo con `MODE_5_SEC` (continuo) y `MODE_5_MIN` (batería). A futuro, los modos son seleccionables vía ESP-NOW/Bluetooth o detección del pin de carga (CHG).
+- **Variables RTC → estáticas:** `RTC_DATA_ATTR` eliminado de todas las variables de producción. En Light-Sleep la RAM se retiene automáticamente. Las variables usan `static` estándar.
+- **BSEC next_call nativo:** El timer de Light-Sleep se calcula desde `bsec_sensor_control().next_call` nativo (confiable con RAM retenida), en lugar del cálculo derivado `1/sample_rate` que era necesario en Deep Sleep.
 
 ### Deprecated
-- **Deep Sleep como modo de producción:** Encapsulado para v2.0 bajo `#ifdef CONFIG_ENABLE_DEEP_SLEEP_V2`. El código de RTC persistence, `gpio_hold_en`, `boot_counter` y cálculo dinámico de sleep se preserva para futura migración a ESP32-S3/C6 o BSEC 4.x.
+- **Deep Sleep como modo de producción:** Todo el código de Deep Sleep (RTC persistence, `gpio_hold_en`, `boot_counter`, FSM WAKE_A/WAKE_B, `bsec_get_state`/`bsec_set_state`, `mark_state_stale`, `reset_rtc_state`, `network_manager_deinit`) queda encapsulado bajo `#ifdef CONFIG_ENABLE_DEEP_SLEEP` para futura migración a ESP32-S3/C6 o BSEC 4.x.
+- **`BME_MODE_RAW_FORCED`:** Eliminado del enum `bme_sampling_mode_t`. Todos los modos usan BSEC para IAQ.
+- **`PM_MODE_1_MIN`:** Eliminado del enum `power_mode_t`.
 
 ## [0.6.0] - 2026-09-03
 ### Added

@@ -57,14 +57,14 @@ Este documento representa la **Capa 1 (Política Global Ejecutiva)**. Todo cambi
 ## 6) Energía y Gestión de Sueño
 
 ### 6.1 Smart Light-Sleep (Modo de Producción v1.x)
-- El nodo MUST usar `esp_light_sleep_start()` con timer wakeup para todos los modos de monitoreo (5s / 1min / 5min). Ver [ADR-001](docs/ADR-001-Power-Management-BSEC.md) para la justificación técnica.
+- El nodo MUST usar `esp_light_sleep_start()` con timer wakeup para todos los modos de monitoreo (5s / 5min). Ver [ADR-001](docs/ADR-001-Power-Management-BSEC.md) para la justificación técnica.
 - RAM completa (RTOS + heap + variables `.bss` de BSEC) se retiene automáticamente. NO se requiere serialización de estado (`bsec_get_state()`/`bsec_set_state()`).
 - Los periféricos RTC MUST permanecer encendidos durante Light-Sleep (errata RTC-126, ver `sensor-node-profile.md §2.1`).
 - El bus I2C NO requiere re-inicialización al despertar de Light-Sleep.
 - Cada módulo crítico SHOULD exponer métricas de consumo/latencia por ciclo.
 
-### 6.2 Deep Sleep (Encapsulado para v2.0 — `CONFIG_ENABLE_DEEP_SLEEP_V2`)
-- Código preservado bajo `#ifdef CONFIG_ENABLE_DEEP_SLEEP_V2` para futura migración a ESP32-S3/C6 o BSEC 4.x.
+### 6.2 Deep Sleep (Encapsulado para v2.0 — `CONFIG_ENABLE_DEEP_SLEEP`)
+- Código preservado bajo `#ifdef CONFIG_ENABLE_DEEP_SLEEP` para futura migración a ESP32-S3/C6 o BSEC 4.x.
 - Cuando habilitado, estado entre ciclos MUST persistirse con `RTC_DATA_ATTR` (mínimo footprint).
 - **Aislamiento de Hardware (Pin Retention):** Durante el Deep Sleep, el dominio de energía principal colapsa. Es obligatorio retener el estado lógico usando `gpio_hold_en()` sobre pines que alimenten buses externos (I2C) para prevenir apagones en sensores ópticos o corrientes parásitas.
 - **Limitación conocida:** BSEC ULP (0.003333 Hz) produce `n_outputs=0` indefinidamente tras Deep Sleep del ESP32 por desfase temporal del boot (~7s + jitter RTC). Ver ADR-001.

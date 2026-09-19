@@ -60,8 +60,8 @@ stateDiagram-v2
 
     state BSEC_Transition {
         note right of BSEC_Transition
-            Continuous (1 Hz) → ULP/LP
-            mark_state_stale()
+            Continuous (1 Hz) → ULP (300s)
+            bsec_set_sample_rate(ULP)
         end note
     }
 
@@ -77,9 +77,8 @@ stateDiagram-v2
 
     state "Smart Light-Sleep" as Sleep {
         note right of Sleep
-            Mode 0: ~5s (LP BSEC)
-            Mode 1: ~55s (LP BSEC)
-            Mode 2: ~293s (ULP BSEC)
+            Mode 5s: ~1s ticks (BSEC 1Hz)
+            Mode 5min: ~295s (BSEC ULP)
             RAM + RTOS + BSEC retenidos
         end note
     }
@@ -88,7 +87,7 @@ stateDiagram-v2
     Sleep --> Production: Timer Wakeup
 ```
 
-> **Nota histórica:** La arquitectura original usaba Deep Sleep como ciclo maestro (WAKE_A → Light-Sleep 4.85s → WAKE_B → Deep Sleep). Este diseño fue abandonado tras la auditoría de BSEC que demostró incompatibilidad temporal del filtro de Kalman con el boot del ESP32. Ver [ADR-001](docs/ADR-001-Power-Management-BSEC.md).
+> **Nota histórica:** La arquitectura original usaba Deep Sleep como ciclo maestro (WAKE_A → Light-Sleep 4.85s → WAKE_B → Deep Sleep). Este diseño fue abandonado tras la auditoría de BSEC que demostró incompatibilidad temporal del filtro de Kalman con el boot del ESP32. El código de Deep Sleep se preserva bajo `#ifdef CONFIG_ENABLE_DEEP_SLEEP`. Ver [ADR-001](docs/ADR-001-Power-Management-BSEC.md).
 
 ---
 
@@ -185,7 +184,7 @@ Este proyecto sigue políticas estrictas de gobierno:
 - [x] **Fase 2b:** Integración Total de SCD41, BMV080, RTC Hardware Híbrido (RV-1805) y estabilización de bus I2C.
 - [x] **Fase 3:** Telemetría Resiliente ESP-NOW y "Caja Negra" Store-and-Forward (MicroSD SPI) con Nanopb.
 - [x] **Fase 3b:** Auditoría BSEC Deep Sleep — ADR-001 aprobado. Pivot a Smart Light-Sleep. Ver [`docs/ADR-001-Power-Management-BSEC.md`](docs/ADR-001-Power-Management-BSEC.md).
-- [ ] **Fase 3c:** Refactor Smart Light-Sleep (3 modos: 5s / 1min / 5min con `esp_light_sleep_start()`).
+- [x] **Fase 3c:** Smart Light-Sleep implementado (2 modos: 5s Continuous / 5min ULP con `esp_light_sleep_start()` y event loop dinámico BSEC-synced).
 - [ ] **Fase 4:** Gateway Criptográfico Edge (ESP32-P4) con conectividad a Google Cloud.
 - [ ] **Fase 5:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
 
