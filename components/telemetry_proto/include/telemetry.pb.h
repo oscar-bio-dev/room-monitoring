@@ -38,6 +38,13 @@ typedef struct _telemetry_TelemetryPayload {
     float    iaq; /* Index of Air Quality (0-500) */
     bool     has_co2;
     uint32_t co2; /* ppm (SCD41 NDIR) */
+    /* === VOCs y CO2 Equivalente (BME688 / BSEC Virtual Sensors) === */
+    bool  has_eco2;
+    float eco2; /* ppm (CO2 equivalente derivado de VOCs, BSEC) */
+    bool  has_bvoc;
+    float bvoc; /* ppm (Breath VOC equivalente, BSEC) */
+    bool  has_tvoc;
+    float tvoc; /* ppb (Total VOC equivalente, BSEC) */
     /* === Partículas (BMV080 Láser) === */
     bool  has_pm1_0;
     float pm1_0; /* ug/m3 */
@@ -62,12 +69,12 @@ extern "C" {
 #define telemetry_TelemetryPayload_init_default                                                                        \
     {                                                                                                                  \
         false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0,  \
-            false, 0, false, 0, false, 0, false, 0, false, 0                                                           \
+            false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0                             \
     }
 #define telemetry_TelemetryPayload_init_zero                                                                           \
     {                                                                                                                  \
         false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0,  \
-            false, 0, false, 0, false, 0, false, 0, false, 0                                                           \
+            false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0, false, 0                             \
     }
 
 /* Field tags (for use in manual encoding/decoding) */
@@ -81,6 +88,9 @@ extern "C" {
 #define telemetry_TelemetryPayload_gas_resistance_tag 12
 #define telemetry_TelemetryPayload_iaq_tag 13
 #define telemetry_TelemetryPayload_co2_tag 14
+#define telemetry_TelemetryPayload_eco2_tag 23
+#define telemetry_TelemetryPayload_bvoc_tag 24
+#define telemetry_TelemetryPayload_tvoc_tag 25
 #define telemetry_TelemetryPayload_pm1_0_tag 15
 #define telemetry_TelemetryPayload_pm2_5_tag 16
 #define telemetry_TelemetryPayload_pm10_0_tag 17
@@ -100,6 +110,9 @@ extern "C" {
     X(a, STATIC, OPTIONAL, FLOAT, gas_resistance, 12)                                                                  \
     X(a, STATIC, OPTIONAL, FLOAT, iaq, 13)                                                                             \
     X(a, STATIC, OPTIONAL, UINT32, co2, 14)                                                                            \
+    X(a, STATIC, OPTIONAL, FLOAT, eco2, 23)                                                                            \
+    X(a, STATIC, OPTIONAL, FLOAT, bvoc, 24)                                                                            \
+    X(a, STATIC, OPTIONAL, FLOAT, tvoc, 25)                                                                            \
     X(a, STATIC, OPTIONAL, FLOAT, pm1_0, 15)                                                                           \
     X(a, STATIC, OPTIONAL, FLOAT, pm2_5, 16)                                                                           \
     X(a, STATIC, OPTIONAL, FLOAT, pm10_0, 17)                                                                          \
@@ -116,7 +129,7 @@ extern const pb_msgdesc_t telemetry_TelemetryPayload_msg;
 
 /* Maximum encoded size of messages (where known) */
 #define TELEMETRY_TELEMETRY_PB_H_MAX_SIZE telemetry_TelemetryPayload_size
-#define telemetry_TelemetryPayload_size 94
+#define telemetry_TelemetryPayload_size 112
 
 #ifdef __cplusplus
 } /* extern "C" */

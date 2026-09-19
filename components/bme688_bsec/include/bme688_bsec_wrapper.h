@@ -32,7 +32,7 @@ int8_t bme688_bsec_set_sample_rate(float sample_rate);
  * @return int8_t 0 (nueva medición), -1 (error), -2 (BSEC dice "no medir aún")
  */
 int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, float *humidity, float *pressure,
-                            float *gas_resistance);
+                            float *gas_resistance, float *eco2, float *bvoc, float *tvoc);
 
 /**
  * @brief Retorna el timestamp (ns) de la próxima medición BSEC.

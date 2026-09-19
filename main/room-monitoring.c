@@ -55,6 +55,7 @@ RTC_DATA_ATTR uint8_t        dynamic_bmv_addr = 0x54;
 RTC_DATA_ATTR uint32_t       node_sequence    = 0;
 RTC_DATA_ATTR static float   rtc_iaq = 0, rtc_temp = 0, rtc_hum = 0;
 RTC_DATA_ATTR static float   rtc_pressure = 0, rtc_gas_res = 0;
+RTC_DATA_ATTR static float   rtc_eco2 = 0, rtc_bvoc = 0, rtc_tvoc = 0;
 RTC_DATA_ATTR static uint8_t rtc_acc            = 0;
 RTC_DATA_ATTR static int     debug_boot_counter = 0;
 #else
@@ -65,6 +66,7 @@ static uint8_t  dynamic_bmv_addr = 0x54;
 static uint32_t node_sequence    = 0;
 static float    rtc_iaq = 0, rtc_temp = 0, rtc_hum = 0;
 static float    rtc_pressure = 0, rtc_gas_res = 0;
+static float    rtc_eco2 = 0, rtc_bvoc = 0, rtc_tvoc = 0;
 static uint8_t  rtc_acc = 0;
 #endif
 
@@ -160,6 +162,20 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, float pm1, float 
     if (scd41_data && scd41_data->co2 > 0) {
         data.co2     = scd41_data->co2;
         data.has_co2 = true;
+    }
+
+    // BSEC Virtual Sensors (eCO2, bVOC, TVOC)
+    if (rtc_eco2 > 0.0f) {
+        data.eco2     = rtc_eco2;
+        data.has_eco2 = true;
+    }
+    if (rtc_bvoc > 0.0f) {
+        data.bvoc     = rtc_bvoc;
+        data.has_bvoc = true;
+    }
+    if (rtc_tvoc > 0.0f) {
+        data.tvoc     = rtc_tvoc;
+        data.has_tvoc = true;
     }
 
     // BMV080
@@ -258,8 +274,8 @@ static void run_warmup_phase(bool bme_initialized) {
 
             // 2. Alimentar BSEC (BME688) después de que el bus se haya liberado
             if (bme_initialized) {
-                int8_t bsec_result =
-                    bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res);
+                int8_t bsec_result = bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure,
+                                                          &rtc_gas_res, &rtc_eco2, &rtc_bvoc, &rtc_tvoc);
                 if (bsec_result == 0) {
                     ESP_LOGD(TAG, "BSEC tick %d/5: T=%.1f H=%.1f P=%.1f IAQ=%.1f", tick + 1, rtc_temp, rtc_hum,
                              rtc_pressure, rtc_iaq);
@@ -309,7 +325,7 @@ static void run_warmup_phase(bool bme_initialized) {
         bme688_bsec_mark_state_stale();
         float   _iaq, _t, _h, _p, _g;
         uint8_t _a;
-        bme688_bsec_read_iaq(&_iaq, &_a, &_t, &_h, &_p, &_g);
+        bme688_bsec_read_iaq(&_iaq, &_a, &_t, &_h, &_p, &_g, NULL, NULL, NULL);
 #endif
     }
 
@@ -363,7 +379,8 @@ static void run_production_cycle(bool bme_initialized) {
         while (1) {
             // 1. Alimentar BSEC (1Hz tick)
             if (bme_initialized) {
-                int8_t r = bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res);
+                int8_t r = bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res,
+                                                &rtc_eco2, &rtc_bvoc, &rtc_tvoc);
                 if (r == 0) {
                     ESP_LOGD(TAG, "BSEC tick: IAQ=%.1f Acc=%d T=%.1f", rtc_iaq, rtc_acc, rtc_temp);
                 }
@@ -386,6 +403,10 @@ static void run_production_cycle(bool bme_initialized) {
                 bool         scd41_ready = false;
                 scd41_get_data_ready(scd41_dev, &scd41_ready);
                 if (scd41_ready) {
+                    // Sensor Fusion: inyectar presión barométrica BME688 → SCD41
+                    if (rtc_pressure > 300.0f && rtc_pressure < 1200.0f) {
+                        scd41_set_ambient_pressure(scd41_dev, (uint16_t) rtc_pressure);
+                    }
                     retry_scd41_read(&scd41_data);
                     ESP_LOGI(TAG, "SCD41   -> CO2: %u ppm | Temp: %.2f C | Hum: %.2f %%", scd41_data.co2,
                              scd41_data.temperature, scd41_data.humidity);
@@ -432,7 +453,8 @@ static void run_production_cycle(bool bme_initialized) {
 
             /* ── PASO 1: BME688/BSEC PRIMERO (bus I2C limpio) ────────── */
             if (bme_initialized) {
-                int8_t r = bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res);
+                int8_t r = bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res,
+                                                &rtc_eco2, &rtc_bvoc, &rtc_tvoc);
                 if (r == 0) {
                     ESP_LOGI(TAG,
                              "BME688  ✅ BSEC ULP | IAQ: %.1f (Acc: %d) | T: %.1f | H: %.1f | P: %.1f hPa | Gas: "
@@ -448,7 +470,11 @@ static void run_production_cycle(bool bme_initialized) {
             /* ── PASO 2: Cooldown I2C (200ms) ────────────────────────── */
             vTaskDelay(pdMS_TO_TICKS(200));
 
-            /* ── PASO 3: Trigger SCD41 Single-Shot (async, necesita 5s) ── */
+            /* ── PASO 3: Sensor Fusion + Trigger SCD41 Single-Shot ──── */
+            // Inyectar presión barométrica BME688 → SCD41 (Sensor Fusion)
+            if (rtc_pressure > 300.0f && rtc_pressure < 1200.0f) {
+                scd41_set_ambient_pressure(scd41_dev, (uint16_t) rtc_pressure);
+            }
             if (retry_scd41_trigger() != ESP_OK) {
                 ESP_LOGE(TAG, "SCD41 trigger failed");
             }
@@ -546,7 +572,8 @@ static void run_production_cycle(bool bme_initialized) {
             if (cfg->bme_mode == BME_MODE_BSEC_ULP) {
                 float   tmp_iaq, tmp_t, tmp_h, tmp_p, tmp_g;
                 uint8_t tmp_a;
-                int8_t  r = bme688_bsec_read_iaq(&tmp_iaq, &tmp_a, &tmp_t, &tmp_h, &tmp_p, &tmp_g);
+                int8_t  r = bme688_bsec_read_iaq(&tmp_iaq, &tmp_a, &tmp_t, &tmp_h, &tmp_p, &tmp_g, &rtc_eco2, &rtc_bvoc,
+                                                 &rtc_tvoc);
                 if (r == 0) {
                     rtc_iaq      = tmp_iaq;
                     rtc_acc      = tmp_a;

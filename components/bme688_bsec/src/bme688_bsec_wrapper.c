@@ -44,6 +44,9 @@ static float                   current_temp         = 0.0f;
 static float                   current_hum          = 0.0f;
 static float                   current_pressure     = 0.0f;
 static float                   current_gas_res      = 0.0f;
+static float                   current_eco2         = 0.0f;
+static float                   current_bvoc         = 0.0f;
+static float                   current_tvoc         = 0.0f;
 
 // Instancia global del BSEC 3.0
 static void *bsec_instance = NULL;
@@ -59,8 +62,8 @@ static int8_t configure_bsec_subscriptions(float sample_rate) {
     if (!bsec_instance)
         return -1;
 
-    bsec_sensor_configuration_t requested_virtual_sensors[6];
-    uint8_t                     n_requested_virtual_sensors = 6;
+    bsec_sensor_configuration_t requested_virtual_sensors[9];
+    uint8_t                     n_requested_virtual_sensors = 9;
 
     requested_virtual_sensors[0].sensor_id   = BSEC_OUTPUT_IAQ;
     requested_virtual_sensors[0].sample_rate = sample_rate;
@@ -74,6 +77,12 @@ static int8_t configure_bsec_subscriptions(float sample_rate) {
     requested_virtual_sensors[4].sample_rate = sample_rate;
     requested_virtual_sensors[5].sensor_id   = BSEC_OUTPUT_RAW_TEMPERATURE;
     requested_virtual_sensors[5].sample_rate = sample_rate;
+    requested_virtual_sensors[6].sensor_id   = BSEC_OUTPUT_CO2_EQUIVALENT;
+    requested_virtual_sensors[6].sample_rate = sample_rate;
+    requested_virtual_sensors[7].sensor_id   = BSEC_OUTPUT_BREATH_VOC_EQUIVALENT;
+    requested_virtual_sensors[7].sample_rate = sample_rate;
+    requested_virtual_sensors[8].sensor_id   = BSEC_OUTPUT_TVOC_EQUIVALENT;
+    requested_virtual_sensors[8].sample_rate = sample_rate;
 
     bsec_sensor_configuration_t required_sensor_settings[BSEC_MAX_PHYSICAL_SENSOR];
     uint8_t                     n_required_sensor_settings = BSEC_MAX_PHYSICAL_SENSOR;
@@ -175,7 +184,7 @@ int8_t bme688_bsec_set_sample_rate(float sample_rate) {
  * Retorna: 0 (nueva medición), -1 (error), -2 (BSEC no requiere medición)
  * ──────────────────────────────────────────────────────────────────────────── */
 int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, float *humidity, float *pressure,
-                            float *gas_resistance) {
+                            float *gas_resistance, float *eco2, float *bvoc, float *tvoc) {
     bsec_library_return_t bsec_status;
 
     struct timeval tv;
@@ -312,6 +321,15 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
                 if (outputs[i].sensor_id == BSEC_OUTPUT_RAW_GAS) {
                     current_gas_res = outputs[i].signal;
                 }
+                if (outputs[i].sensor_id == BSEC_OUTPUT_CO2_EQUIVALENT) {
+                    current_eco2 = outputs[i].signal;
+                }
+                if (outputs[i].sensor_id == BSEC_OUTPUT_BREATH_VOC_EQUIVALENT) {
+                    current_bvoc = outputs[i].signal;
+                }
+                if (outputs[i].sensor_id == BSEC_OUTPUT_TVOC_EQUIVALENT) {
+                    current_tvoc = outputs[i].signal;
+                }
             }
 
 #ifdef CONFIG_ENABLE_DEEP_SLEEP
@@ -367,6 +385,12 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
             *pressure = current_pressure;
         if (gas_resistance)
             *gas_resistance = current_gas_res;
+        if (eco2)
+            *eco2 = current_eco2;
+        if (bvoc)
+            *bvoc = current_bvoc;
+        if (tvoc)
+            *tvoc = current_tvoc;
         return 0;
     }
 
@@ -383,6 +407,12 @@ int8_t bme688_bsec_read_iaq(float *iaq, uint8_t *accuracy, float *temperature, f
         *pressure = current_pressure;
     if (gas_resistance)
         *gas_resistance = current_gas_res;
+    if (eco2)
+        *eco2 = current_eco2;
+    if (bvoc)
+        *bvoc = current_bvoc;
+    if (tvoc)
+        *tvoc = current_tvoc;
     return -2;
 }
 

@@ -48,6 +48,20 @@ esp_err_t scd41_stop_periodic_measurement(i2c_master_dev_handle_t dev_handle);
  */
 esp_err_t scd41_get_data_ready(i2c_master_dev_handle_t dev_handle, bool *ready);
 
+/**
+ * @brief Establece la presión ambiental para compensación de CO2 (0xE000).
+ *
+ * Puede enviarse durante periodic measurement o antes de single-shot.
+ * Sobrescribe cualquier compensación por altitud previa.
+ * Fuente: SCD4x Datasheet v1.7, §3.7.5.
+ *
+ * @param dev_handle Handle I2C del SCD41
+ * @param pressure_hpa Presión en hectopascales (700–1200 hPa).
+ *                     Se envía como word = hPa (equivalente a Pa/100).
+ * @return esp_err_t ESP_OK si el comando fue aceptado.
+ */
+esp_err_t scd41_set_ambient_pressure(i2c_master_dev_handle_t dev_handle, uint16_t pressure_hpa);
+
 #ifdef __cplusplus
 }
 #endif

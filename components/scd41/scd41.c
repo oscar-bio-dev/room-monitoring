@@ -135,3 +135,31 @@ esp_err_t scd41_get_data_ready(i2c_master_dev_handle_t dev_handle, bool *ready) 
 
     return ESP_OK;
 }
+
+esp_err_t scd41_set_ambient_pressure(i2c_master_dev_handle_t dev_handle, uint16_t pressure_hpa) {
+    if (!dev_handle)
+        return ESP_ERR_INVALID_ARG;
+
+    // Datasheet SCD4x §3.7.5: valid range 70000–120000 Pa → 700–1200 hPa
+    if (pressure_hpa < 700 || pressure_hpa > 1200)
+        return ESP_ERR_INVALID_ARG;
+
+    // word[0] = ambient_P [Pa] / 100 = pressure_hpa (numéricamente idéntico)
+    uint8_t msb     = (uint8_t) (pressure_hpa >> 8);
+    uint8_t lsb     = (uint8_t) (pressure_hpa & 0xFF);
+    uint8_t data[2] = {msb, lsb};
+    uint8_t crc     = scd41_crc8(data, 2);
+
+    // Comando 0xE000 (Set Ambient Pressure) + word + CRC
+    uint8_t   cmd[5] = {0xE0, 0x00, msb, lsb, crc};
+    esp_err_t err    = i2c_master_transmit(dev_handle, cmd, 5, 1000 / portTICK_PERIOD_MS);
+
+    if (err == ESP_OK) {
+        ESP_LOGD(TAG, "SCD41 ambient pressure set to %u hPa (word=0x%04X, CRC=0x%02X)", pressure_hpa, pressure_hpa,
+                 crc);
+    } else {
+        ESP_LOGW(TAG, "SCD41 set_ambient_pressure(%u hPa) failed: %s", pressure_hpa, esp_err_to_name(err));
+    }
+
+    return err;
+}

@@ -32,6 +32,11 @@ message TelemetryPayload {
     optional float iaq = 13;              // Index of Air Quality (0-500)
     optional uint32 co2 = 14;             // ppm (SCD41 NDIR)
 
+    // === VOCs y CO2 Equivalente (BME688 / BSEC Virtual Sensors) ===
+    optional float eco2 = 23;             // ppm (CO2 equivalente derivado de VOCs, BSEC)
+    optional float bvoc = 24;             // ppm (Breath VOC equivalente, BSEC)
+    optional float tvoc = 25;             // ppb (Total VOC equivalente, BSEC)
+
     // === Partículas (BMV080 Láser) ===
     optional float pm1_0 = 15;            // ug/m3
     optional float pm2_5 = 16;            // ug/m3
