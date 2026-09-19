@@ -27,6 +27,12 @@ El firmware ha sido diseñado bajo los estándares empresariales más estrictos 
 - **Core 0 (Pro Core):** Tareas asíncronas pesadas (stack de red, ESP-NOW, telemetría).
 - **Core 1 (App Core):** Tareas críticas ancladas vía FreeRTOS dedicadas a los drivers I2C y temporización de sensores láser.
 
+### Carga Útil (Payload) y Sensor Fusion
+El nodo transmite una trama Protobuf (`telemetry.proto`) ultra-optimizada de **68 bytes** vía ESP-NOW. Gracias a la sinergia *Sensor Fusion*, el payload integra:
+- **Bosch BMV080:** PM1.0, PM2.5, PM10 (µg/m³)
+- **Sensirion SCD41:** CO₂ real fotoacústico (ppm) con compensación de presión atmosférica inyectada dinámicamente.
+- **Bosch BME688 (BSEC 3.0):** eCO₂ (CO₂ Equivalente), IAQ (Índice de Calidad del Aire), Temperatura, Humedad, Presión barométrica y Resistencia de Gas.
+
 ### Máquina de Estados (Smart Light-Sleep v1.x)
 
 El nodo opera en un bucle de producción continuo basado en Light-Sleep, que retiene la totalidad de la RAM (RTOS + heap + estado BSEC) entre ciclos:
@@ -97,7 +103,7 @@ Este repositorio implementa tácticas críticas para hardware desplegado en camp
 4. **Integridad de mediciones:** Las tres palabras de la trama SCD41 se validan mediante CRC-8 antes de convertirlas a CO₂, temperatura y humedad. Las operaciones SCD41 se reintentan hasta tres veces y los fallos de inicialización de cada sensor deshabilitan únicamente esa medición.
 5. **Sincronización de Tiempo Real (RTC Híbrido RV-1805):** En Cold Boot, el sistema sincroniza `gettimeofday()` contra el chip de hardware RV-1805 (±2 ppm). El resto del ciclo confía en el reloj interno anclado al temporizador RTC profundo (`CONFIG_ESP_TIME_FUNCS_USE_RTC_TIMER=y`), logrando control de tiempo milimétrico sin penalizar el bus I2C ni consumir batería.
 6. **Anticolisión I2C (Clock-Stretching):** Implementación de retardos tácticos mecánicos estables entre la excitación del escáner láser BMV080 (250ms), el disparo del sensor NDIR SCD41 (50ms) y la ráfaga de datos del BME688. Además, el láser BMV080 se sondea mediante *fast-polling* (100ms) durante el calentamiento y rutinas de purgado (15-buffer flush) para evitar fallos catastróficos por desbordamiento de su FIFO interno y bloqueos de bus (`I2C software timeout`).
-7. **Telemetría ESP-NOW y Caja Negra (Store-and-Forward):** La transmisión de datos opera vía ESP-NOW (*peer-to-peer*) hacia el Gateway para minimizar el tiempo de radio encendida. Si el Gateway no emite confirmación (ACK), el sistema inicializa *On-Demand* el lector MicroSD (bus VSPI), empaqueta las lecturas con **Nanopb** (Protobuf), las anexa a un archivo binario y apaga el bus SPI por completo. Al recuperar conexión, la "Caja Negra" se vacía dinámicamente enviando lotes máximos de 15 registros para prevenir caídas de tensión (Brown-out).
+7. **Telemetría ESP-NOW y Caja Negra (Store-and-Forward):** La transmisión de datos opera vía ESP-NOW (*peer-to-peer*) hacia el Gateway para minimizar el tiempo de radio encendida. Si el Gateway no emite confirmación (ACK), el sistema inicializa *On-Demand* el lector MicroSD (bus VSPI), empaqueta la trama ultra-optimizada de **68 bytes** con **Nanopb** (Protobuf), la anexa a un archivo binario y apaga el bus SPI por completo. Al recuperar conexión, la "Caja Negra" se vacía dinámicamente enviando lotes máximos de 15 registros para prevenir caídas de tensión (Brown-out).
 
 ---
 

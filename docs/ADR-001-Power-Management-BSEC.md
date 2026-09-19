@@ -274,3 +274,24 @@ El RV-1805 es excelente para mantener el uptime POSIX. El problema no es la prec
 | Hibernation | 5 µA | Ninguna | RTC timer only |
 
 Fuente: Espressif ESP32 Datasheet, Table 4-2.
+
+---
+
+## 7. Evolución MVP: Variante BSEC y Sensor Fusion
+
+### 7.1 El Error `-35` y la Variante BSEC
+Durante la integración de los sensores virtuales de BSEC, nos encontramos con el error `BSEC_E_CONFIG_FEATUREMISMATCH (-35)` al intentar suscribirnos a 9 outputs (incluyendo `bVOC` y `TVOC`).
+La causa raíz documentada es que la variante estándar enlazada (`libalgobsec.a`, variante **IAQ** de 214KB) no soporta dichos outputs en su bitfield interno (`1074952687`). Aunque existe la variante **Sel_IAQ** (255KB) que sí los soporta (`2146597359`), decidimos mantener la variante IAQ estándar para el MVP para garantizar estabilidad.
+
+**Decisión:**
+- Reducir las suscripciones a 7 outputs: `IAQ`, `Temp`, `Hum`, `Presión`, `Gas`, y añadir `CO2_EQUIVALENT` (eCO2).
+- Los campos Protobuf `bvoc` y `tvoc` quedan definidos y reservados para la versión v1.1. En el futuro, la migración consistirá en swapear la librería a `Sel_IAQ`, actualizar `bsec_datatypes.h` (blob size 2001/255, outputs 24) y descomentar las suscripciones.
+
+### 7.2 Sensor Fusion: Compensación de Presión SCD41
+Para maximizar la precisión del cálculo de CO2 real mediante NDIR fotoacústico, integramos una sinergia (Sensor Fusion) entre el BME688 y el SCD41.
+Según el Datasheet del Sensirion SCD4x (Sección 3.7.5 *set_ambient_pressure*), inyectar la presión atmosférica actual mejora la precisión de la lectura de CO2, ya que la concentración de moléculas de gas detectadas por la cámara fotoacústica varía con la presión barométrica.
+
+**Implementación:**
+- Se extrae `BSEC_OUTPUT_RAW_PRESSURE` del BME688.
+- Se inyecta al SCD41 antes de cada medición periódica o *single-shot* mediante el comando `0xE000` (`scd41_set_ambient_pressure(pressure_pa / 100)`).
+- Esto convierte al BME688 en un co-procesador barométrico del SCD41, resultando en lecturas de CO2 real (SCD41) y eCO2 (BSEC) altamente precisas en un mismo payload.

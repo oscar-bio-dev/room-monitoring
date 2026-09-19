@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SCD41 Periodic Measurement API:** Nuevas funciones `scd41_start_periodic_measurement()` (0x21B1), `scd41_stop_periodic_measurement()` (0x3F86) y `scd41_get_data_ready()` (0xE4B8) para MODE_5_SEC.
 - **Network Manager 3-API Pattern:** `init()` (una vez en boot), `wake()` (esp_wifi_start, ~5ms pre-TX), `sleep()` (esp_wifi_stop pre-Light-Sleep). Ahorra ~40 KB de heap por ciclo vs el patrón init/deinit anterior.
 - **BSEC IAQ en todos los modos:** Eliminado `BME_MODE_RAW_FORCED`. Todos los modos de producción usan BSEC (Continuous o ULP) para datos de IAQ completo.
+- **Sensor Fusion (SCD41 + BME688):** Implementada inyección en tiempo real de presión barométrica (`BSEC_OUTPUT_RAW_PRESSURE`) del BME688 hacia el SCD41 (comando `0xE000`) para compensación termodinámica del cálculo de CO2 fotoacústico.
+- **Protobuf Payload Expandido (68 bytes):** Añadidos los campos `eco2`, `bvoc`, y `tvoc` a `telemetry.proto`. El nodo ahora envía una trama ultra-optimizada de 68 bytes con datos fusionados de los 3 sensores.
+
+### Fixed
+- **BSEC_E_CONFIG_FEATUREMISMATCH (-35):** Resuelto el error de incompatibilidad con la variante IAQ estándar de BSEC al reducir las suscripciones a 7 outputs (IAQ, Temp, Hum, Presión, Gas, y eCO2). Los sensores virtuales `bvoc` y `tvoc` quedan reservados en el esquema Protobuf para futura migración a la variante `Sel_IAQ`.
 
 ### Changed
 - **Simplificación a 2 modos de energía:** Eliminado `PM_MODE_1_MIN`. El sistema opera solo con `MODE_5_SEC` (continuo) y `MODE_5_MIN` (batería). A futuro, los modos son seleccionables vía ESP-NOW/Bluetooth o detección del pin de carga (CHG).
