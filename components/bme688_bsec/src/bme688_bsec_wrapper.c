@@ -502,3 +502,37 @@ void bme688_bsec_reset_rtc_state(void) {
     ESP_LOGW(TAG, "🔄 BSEC RTC state RESET (cold boot / fresh flash)");
 }
 #endif
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Self-Test: Validación de Hardware (Activa)
+ * ──────────────────────────────────────────────────────────────────────────── */
+esp_err_t bme688_bsec_self_test(i2c_master_dev_handle_t dev_handle, bool *test_passed) {
+    if (!dev_handle || !test_passed) {
+        if (test_passed)
+            *test_passed = false;
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "BME688 Self-Test Triggered. Reading Chip ID...");
+
+    uint8_t reg_addr = BME68X_REG_CHIP_ID;
+    uint8_t chip_id  = 0;
+
+    esp_err_t err = bosch_hal_i2c_read(reg_addr, &chip_id, 1, (void *) dev_handle);
+
+    if (err != 0) { // bosch_hal_i2c_read returns BME68X_OK (0) on success
+        ESP_LOGE(TAG, "BME688 Self-Test Failed: I2C error %d", err);
+        *test_passed = false;
+        return ESP_FAIL;
+    }
+
+    if (chip_id == BME68X_CHIP_ID) {
+        ESP_LOGI(TAG, "BME688 Self-Test Passed. Chip ID matches (0x%02X)", chip_id);
+        *test_passed = true;
+    } else {
+        ESP_LOGE(TAG, "BME688 Self-Test Failed! Invalid Chip ID: 0x%02X (Expected 0x%02X)", chip_id, BME68X_CHIP_ID);
+        *test_passed = false;
+    }
+
+    return ESP_OK;
+}

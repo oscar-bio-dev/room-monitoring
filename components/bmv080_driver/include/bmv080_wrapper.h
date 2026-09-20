@@ -90,6 +90,17 @@ int bmv080_wrapper_read_full(bmv080_reading_t *reading);
  */
 void bmv080_wrapper_deinit(void);
 
+/**
+ * @brief Ejecuta una validación rápida de hardware (Self-Test pasivo).
+ *
+ * Llama a bmv080_reset() y verifica que la interfaz de comunicación responde
+ * correctamente y que no hay flags de error fatales en el ASIC.
+ *
+ * @param[out] test_passed true si el ASIC responde y no reporta errores.
+ * @return bmv080_status_code_t Código de estado oficial
+ */
+bmv080_status_code_t bmv080_wrapper_self_test(bool *test_passed);
+
 #ifdef __cplusplus
 }
 #endif

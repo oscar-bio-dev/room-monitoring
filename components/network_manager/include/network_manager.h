@@ -26,10 +26,19 @@ esp_err_t network_manager_wake(void);
 void network_manager_sleep(void);
 
 /**
- * @brief Envía un payload por ESP-NOW bloqueando hasta ACK o fallo.
- * @return ESP_OK si el Gateway respondió (ACK), ESP_FAIL si no.
+ * @brief Envía un payload por ESP-NOW bloqueando hasta ACK MAC o fallo.
+ * @return ESP_OK si el hardware transmitió, ESP_FAIL si no.
  */
 esp_err_t network_manager_send(const uint8_t *payload, size_t len);
+
+/**
+ * @brief Espera de forma asíncrona (hasta timeout_ms) la recepción de un comando por ESP-NOW.
+ * @param buffer Buffer donde se copiarán los datos recibidos (ej. array de 250 bytes)
+ * @param len Puntero donde se escribirá la longitud de los datos recibidos
+ * @param timeout_ms Tiempo máximo de espera en milisegundos
+ * @return ESP_OK si se recibió un paquete, ESP_ERR_TIMEOUT si expiró el tiempo
+ */
+esp_err_t network_manager_receive_cmd(uint8_t *buffer, size_t *len, uint32_t timeout_ms);
 
 #ifdef CONFIG_ENABLE_DEEP_SLEEP
 /**

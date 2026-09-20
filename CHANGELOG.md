@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-19
+### Added
+- **Transporte Bidireccional Asíncrono:** Implementado un patrón de enrutamiento mediante un *Byte de Cabecera* (`0x10` Telemetría, `0x11` Diagnóstico, `0x20` GatewayAck).
+- **Buzón (Mailbox) FreeRTOS:** Tras enviar telemetría, el nodo entra en una escucha bloqueante de bajo consumo durante 200ms (`network_manager_receive_cmd`). Esto permite interceptar respuestas y comandos del Gateway.
+- **Hardware Self-Test Activo:** Creado el sistema de diagnóstico a nivel de silicio (secuenciador de ~11s). Se invoca remotamente vía `CMD_RUN_SELF_TEST`.
+  - **SCD41:** Se activa el test `0x3639` con validación estricta de CRC8 y decodificación de registros de error.
+  - **BMV080:** Se fuerza un *Cold Boot* (Hardware Reset + Firmware Reload + Sensor ID check) evadiendo bloqueos catastróficos del bus.
+  - **BME688:** Validación directa vía I2C del `Chip ID` (registro `0xD0`).
+- **Protobuf v2 (Nanopb):** `telemetry.proto` extendido. Nuevos mensajes `GatewayAck`, `Command`, `DiagnosticReport` y enums `NodeStatus`. Se inyecta pasivamente el campo `system_error_bitmask` en la telemetría habitual.
+
 ## [0.8.0] - 2026-09-19
 ### Added
 - **BMV080 Number Concentration (BST-BMV080-DS000-10, §5.2.1.3.1):** El wrapper del sensor láser ahora extrae los 6 campos completos de `bmv080_output_t`: 3 de concentración de masa (µg/m³) y 3 de concentración numérica (particles/m³). Esto duplica la información de partículas disponible para el backend, habilitando cálculos de AQI por distribución de tamaño (EPA USA) y clasificación de salas limpias (ISO 14644).

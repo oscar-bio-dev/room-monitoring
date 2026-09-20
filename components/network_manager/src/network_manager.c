@@ -18,6 +18,13 @@ static EventGroupHandle_t esp_now_event_group;
 #define SEND_SUCCESS_BIT BIT0
 #define SEND_FAIL_BIT BIT1
 
+typedef struct {
+    uint8_t data[250];
+    size_t  len;
+} rx_packet_t;
+
+static QueueHandle_t rx_command_queue = NULL;
+
 static uint8_t gateway_mac[6] = {0};
 static bool    s_initialized  = false;
 
@@ -44,6 +51,15 @@ static void esp_now_send_cb(const uint8_t *mac_addr, esp_now_send_status_t statu
     }
 }
 
+static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
+    if (len > 0 && len <= 250 && rx_command_queue != NULL) {
+        rx_packet_t pkt;
+        pkt.len = len;
+        memcpy(pkt.data, data, len);
+        xQueueSend(rx_command_queue, &pkt, 0);
+    }
+}
+
 void network_manager_init(void) {
     if (s_initialized) {
         ESP_LOGW(TAG, "Already initialized, skipping");
@@ -52,6 +68,10 @@ void network_manager_init(void) {
 
     if (!esp_now_event_group) {
         esp_now_event_group = xEventGroupCreate();
+    }
+
+    if (!rx_command_queue) {
+        rx_command_queue = xQueueCreate(1, sizeof(rx_packet_t));
     }
 
     /* Parsear la MAC del Gateway desde Kconfig */
@@ -85,6 +105,7 @@ void network_manager_init(void) {
 
     ESP_ERROR_CHECK(esp_now_init());
     ESP_ERROR_CHECK(esp_now_register_send_cb(esp_now_send_cb));
+    ESP_ERROR_CHECK(esp_now_register_recv_cb(esp_now_recv_cb));
 
 #if CONFIG_ESPNOW_ENCRYPT
     /* Configurar la Primary Master Key (PMK) a nivel global */
@@ -148,6 +169,19 @@ esp_err_t network_manager_send(const uint8_t *payload, size_t len) {
     } else {
         return ESP_FAIL;
     }
+}
+
+esp_err_t network_manager_receive_cmd(uint8_t *buffer, size_t *len, uint32_t timeout_ms) {
+    if (!rx_command_queue || !buffer || !len)
+        return ESP_ERR_INVALID_ARG;
+
+    rx_packet_t pkt;
+    if (xQueueReceive(rx_command_queue, &pkt, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+        *len = pkt.len;
+        memcpy(buffer, pkt.data, pkt.len);
+        return ESP_OK;
+    }
+    return ESP_ERR_TIMEOUT;
 }
 
 #ifdef CONFIG_ENABLE_DEEP_SLEEP

@@ -62,6 +62,14 @@ esp_err_t scd41_get_data_ready(i2c_master_dev_handle_t dev_handle, bool *ready);
  */
 esp_err_t scd41_set_ambient_pressure(i2c_master_dev_handle_t dev_handle, uint16_t pressure_hpa);
 
+/**
+ * @brief Ejecuta el self-test en hardware del sensor SCD41.
+ *        Nota: Es una llamada bloqueante de 10 segundos (0x3639).
+ *
+ * @param[out] test_passed true si el sensor retornó 0x0000 (sin fallos).
+ */
+esp_err_t scd41_perform_self_test(i2c_master_dev_handle_t dev_handle, bool *test_passed);
+
 #ifdef __cplusplus
 }
 #endif

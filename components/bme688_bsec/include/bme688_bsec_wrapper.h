@@ -73,6 +73,14 @@ static inline void bme688_bsec_mark_state_stale(void) {}
 static inline void bme688_bsec_reset_rtc_state(void) {}
 #endif
 
+/**
+ * @brief Ejecuta el self-test en hardware del sensor BME688.
+ *        Verifica la respuesta del ASIC leyendo el registro Chip ID (0xD0).
+ *
+ * @param[out] test_passed true si el Chip ID es correcto (0x61).
+ */
+esp_err_t bme688_bsec_self_test(i2c_master_dev_handle_t dev_handle, bool *test_passed);
+
 #ifdef __cplusplus
 }
 #endif

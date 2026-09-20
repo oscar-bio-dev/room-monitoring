@@ -60,4 +60,36 @@ message TelemetryPayload {
     optional uint32 battery_mv = 20;      // Millivolts (ADC, futuro)
     optional uint32 sleep_cycles = 21;    // Hardware wake count
     optional bool is_calibrating = 22;    // true = datos parciales (BSEC anchor point o warmup)
+
+    // Status report pasivo
+    optional uint32 system_error_bitmask = 32;
+    optional NodeStatus status = 33;
+}
+
+// Estados del Nodo
+enum NodeStatus {
+    MONITORING = 0;
+    CALIBRATING = 1;
+    SELF_TESTING = 2;
+    HARDWARE_ERROR = 3;
+}
+
+// Comandos desde Gateway hacia Nodo
+enum Command {
+    CMD_NONE = 0;
+    CMD_RUN_SELF_TEST = 1;
+    CMD_REBOOT = 2;
+}
+
+// Respuesta del Gateway (ACK Payload)
+message GatewayAck {
+    optional Command command = 1;
+}
+
+// Reporte de Hardware Self-Test (Activo)
+message DiagnosticReport {
+    optional uint32 system_error_bitmask = 1;
+    optional bool scd41_passed = 2;
+    optional bool bmv080_passed = 3;
+    optional bool bme688_passed = 4;
 }

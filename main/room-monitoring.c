@@ -34,11 +34,16 @@
 #include "rv1805_wrapper.h"
 #include "network_manager.h"
 #include "storage_manager.h"
+#include "scd41.h"
 #include "telemetry.pb.h"
 #include "pb_encode.h"
+#include "pb_decode.h"
+#include "node_diagnostics.h"
 #include <time.h>
 
-static const char *TAG = "app_main";
+static const char *TAG = "room-monitoring";
+
+uint32_t current_errors = ERR_NONE;
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Estado Persistente
@@ -97,6 +102,64 @@ static esp_err_t retry_scd41_trigger(void) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     return err;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Helper: Reporte de Self-Test
+ * ──────────────────────────────────────────────────────────────────────────── */
+static void run_self_test_sequence(void) {
+    ESP_LOGW(TAG, "Iniciando Secuencia Activa de Self-Test (Bloqueante)...");
+
+    // El SCD41 debe detener su medición periódica primero
+    scd41_stop_periodic_measurement(scd41_dev);
+    vTaskDelay(pdMS_TO_TICKS(500)); // Delay requerido por el datasheet tras el stop
+
+    bool scd41_ok  = false;
+    bool bmv080_ok = false;
+    bool bme688_ok = false;
+
+    // 1. SCD41 (Tarda 10 segundos)
+    scd41_perform_self_test(scd41_dev, &scd41_ok);
+    if (!scd41_ok)
+        current_errors |= ERR_SCD41;
+
+    // 2. BMV080
+    bmv080_wrapper_self_test(&bmv080_ok);
+    if (!bmv080_ok)
+        current_errors |= ERR_BMV080;
+
+    // 3. BME688
+    bme688_bsec_self_test(bme688_dev, &bme688_ok);
+    if (!bme688_ok)
+        current_errors |= ERR_BME688;
+
+    // Reiniciar SCD41 a su modo continuo
+    scd41_start_periodic_measurement(scd41_dev);
+
+    // Preparar el reporte de diagnóstico
+    telemetry_DiagnosticReport report = telemetry_DiagnosticReport_init_zero;
+    report.has_system_error_bitmask   = true;
+    report.system_error_bitmask       = current_errors;
+    report.has_scd41_passed           = true;
+    report.scd41_passed               = scd41_ok;
+    report.has_bmv080_passed          = true;
+    report.bmv080_passed              = bmv080_ok;
+    report.has_bme688_passed          = true;
+    report.bme688_passed              = bme688_ok;
+
+    uint8_t      buffer[256];
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+
+    if (pb_encode(&stream, telemetry_DiagnosticReport_fields, &report)) {
+        uint8_t tx_buffer[256];
+        tx_buffer[0] = 0x11; // Header: Diagnostic Report
+        memcpy(&tx_buffer[1], buffer, stream.bytes_written);
+
+        ESP_LOGI(TAG, "📡 Enviando Reporte de Diagnóstico (%d bytes)", (int) stream.bytes_written + 1);
+        network_manager_send(tx_buffer, stream.bytes_written + 1);
+    }
+
+    ESP_LOGW(TAG, "Secuencia de Self-Test finalizada. Reanudando operaciones.");
 }
 
 static esp_err_t retry_scd41_read(scd41_data_t *data) {
@@ -210,16 +273,46 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
     data.is_calibrating     = power_manager_is_calibrating() || (rtc_acc == 0);
     data.has_is_calibrating = true;
 
+    // Status report pasivo
+    data.system_error_bitmask     = current_errors;
+    data.has_system_error_bitmask = true;
+
+    data.status     = (current_errors != ERR_NONE)
+                          ? telemetry_NodeStatus_HARDWARE_ERROR
+                          : (data.is_calibrating ? telemetry_NodeStatus_CALIBRATING : telemetry_NodeStatus_MONITORING);
+    data.has_status = true;
+
     // TX
     uint8_t      buffer[256];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
     if (pb_encode(&stream, TelemetryPayload_fields, &data)) {
-        if (network_manager_send(buffer, stream.bytes_written) == ESP_OK) {
-            ESP_LOGI(TAG, "📡 Telemetría enviada (%d bytes)", (int) stream.bytes_written);
+        uint8_t tx_buffer[256];
+        tx_buffer[0] = 0x10; // Header: Telemetry
+        memcpy(&tx_buffer[1], buffer, stream.bytes_written);
 
-            // Ventana de Recepción Downlink (50ms)
-            vTaskDelay(pdMS_TO_TICKS(50));
+        if (network_manager_send(tx_buffer, stream.bytes_written + 1) == ESP_OK) {
+            ESP_LOGI(TAG, "📡 Telemetría enviada (%d bytes)", (int) stream.bytes_written + 1);
+
+            // Ventana de Recepción Downlink (200ms)
+            uint8_t rx_buf[250];
+            size_t  rx_len = 0;
+            if (network_manager_receive_cmd(rx_buf, &rx_len, 200) == ESP_OK) {
+                if (rx_len > 0 && rx_buf[0] == 0x20) { // Header: GatewayAck
+                    telemetry_GatewayAck ack       = telemetry_GatewayAck_init_zero;
+                    pb_istream_t         rx_stream = pb_istream_from_buffer(&rx_buf[1], rx_len - 1);
+                    if (pb_decode(&rx_stream, telemetry_GatewayAck_fields, &ack)) {
+                        if (ack.has_command && ack.command == telemetry_Command_CMD_RUN_SELF_TEST) {
+                            ESP_LOGW(TAG, "⚠️ CMD_RUN_SELF_TEST interceptado. Desviando ejecución...");
+                            run_self_test_sequence();
+                        } else if (ack.has_command && ack.command == telemetry_Command_CMD_REBOOT) {
+                            ESP_LOGW(TAG, "⚠️ CMD_REBOOT interceptado. Reiniciando en 3s...");
+                            vTaskDelay(pdMS_TO_TICKS(3000));
+                            esp_restart();
+                        }
+                    }
+                }
+            }
 
             // Store & Forward
             TelemetryPayload batch[15];
@@ -230,7 +323,9 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
                 for (size_t i = 0; i < count; i++) {
                     pb_ostream_t off_stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
                     if (pb_encode(&off_stream, TelemetryPayload_fields, &batch[i])) {
-                        if (network_manager_send(buffer, off_stream.bytes_written) == ESP_OK) {
+                        tx_buffer[0] = 0x10; // Header: Telemetry
+                        memcpy(&tx_buffer[1], buffer, off_stream.bytes_written);
+                        if (network_manager_send(tx_buffer, off_stream.bytes_written + 1) == ESP_OK) {
                             success_count++;
                         } else {
                             break;

@@ -318,3 +318,41 @@ void bmv080_wrapper_deinit(void) {
     }
     s_bmv080_i2c_dev = NULL;
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Self-Test: Validación de Hardware (Activa)
+ * ──────────────────────────────────────────────────────────────────────────── */
+bmv080_status_code_t bmv080_wrapper_self_test(bool *test_passed) {
+    if (!s_bmv080_i2c_dev || !test_passed) {
+        if (test_passed)
+            *test_passed = false;
+        return E_BMV080_ERROR_NULLPTR;
+    }
+
+    // Cerramos el handle si está activo
+    if (bmv080_handle) {
+        bmv080_stop_measurement(bmv080_handle);
+        bmv080_close(&bmv080_handle);
+        bmv080_handle = NULL;
+    }
+
+    ESP_LOGI(TAG, "BMV080 Self-Test Triggered. Rebooting ASIC and validating firmware load...");
+
+    // Forzamos un re-init completo. Esto valida:
+    // 1. I2C Bus integrity
+    // 2. ROM Bootloader
+    // 3. Firmware Download (~1 segundo bloqueante)
+    // 4. ASIC Reset
+    // 5. Lectura de Sensor ID
+    bmv080_status_code_t rslt = bmv080_wrapper_init(s_bmv080_i2c_dev);
+
+    if (rslt == E_BMV080_OK) {
+        *test_passed = true;
+        ESP_LOGI(TAG, "BMV080 Self-Test Passed.");
+    } else {
+        *test_passed = false;
+        ESP_LOGE(TAG, "BMV080 Self-Test Failed! Init sequence returned %d", rslt);
+    }
+
+    return rslt;
+}
