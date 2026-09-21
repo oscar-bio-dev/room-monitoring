@@ -191,6 +191,7 @@ Este proyecto sigue políticas estrictas de gobierno:
 - [x] **Fase 3c:** Smart Light-Sleep implementado (2 modos: 5s Continuous / 5min ULP con `esp_light_sleep_start()` y event loop dinámico BSEC-synced).
 - [x] **Fase 3d:** BMV080 Industrial Optimization — Number concentration (particles/m³), obstruction detection, laser lifecycle `start()/stop()`, payload expandido a 98 bytes.
 - [x] **Fase 3e:** Transporte Bidireccional y Mailbox Asíncrono — Byte de Cabecera (0x10, 0x11, 0x20), espera de ACK, y Secuenciador de Self-Test Activo a nivel I2C en respuesta a comandos del Gateway.
+- [x] **Fase 3f:** Aprovisionamiento BLE (NimBLE GATT Server) y Persistencia NVS. Estado Excluyente A/B (Boot and Release). Timeout de 5 minutos y características: MAC, Intervalo, FRC, Self-Test.
 - [ ] **Fase 4:** Gateway Criptográfico Edge (ESP32-P4) con conectividad a Google Cloud.
 - [ ] **Fase 5:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
 

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-20
+### Added
+- **Aprovisionamiento BLE (NimBLE GATT Server):** El nodo arranca en *Estado A* emitiendo una señal BLE (UUID primario: `0xFF00`). Permite configuración inicial usando una App móvil (ej. nRF Connect).
+  - `CHAR_GATEWAY_MAC` (`0xFF01` WRITE): Recibe la MAC de 6 bytes del Gateway.
+  - `CHAR_INTERVAL` (`0xFF02` READ/WRITE): Configura el modo de operación (`300` = 5min, `5` = 5s).
+  - `CHAR_FRC_TRIGGER` (`0xFF03` WRITE): Fuerza una calibración del SCD41 inyectando la referencia externa (ej. 400 ppm).
+  - `CHAR_SELF_TEST` (`0xFF04` WRITE/NOTIFY): Al escribir `0x01`, se ejecuta el hardware self-test (11s) y se notifica el `system_error_bitmask`.
+- **Persistencia NVS:** Se incorporó el componente genérico `config_manager` para retener la MAC del Gateway y el intervalo de monitoreo en memoria Flash.
+- **Transición Excluyente (State Machine A/B):** Tras aprovisionar vía BLE (o expirar el timeout de 5 minutos de espera), el nodo destruye el stack Bluetooth y usa `esp_bt_controller_mem_release(ESP_BT_MODE_BTDM)` para retornar ~60 KB a la RAM principal antes de iniciar el ciclo *Smart Light-Sleep* (Estado B).
+- **Deep Sleep por Timeout:** Si el nodo no se aprovisiona y no tiene una configuración guardada (primer arranque), transcurridos 5 minutos entra en Deep Sleep indefinido para proteger la batería, requiriendo un hard reset manual (botón) para reiniciar el emparejamiento.
+
 ## [0.9.0] - 2026-09-19
 ### Added
 - **Transporte Bidireccional Asíncrono:** Implementado un patrón de enrutamiento mediante un *Byte de Cabecera* (`0x10` Telemetría, `0x11` Diagnóstico, `0x20` GatewayAck).

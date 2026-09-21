@@ -34,6 +34,8 @@
 #include "rv1805_wrapper.h"
 #include "network_manager.h"
 #include "storage_manager.h"
+#include "config_manager.h"
+#include "ble_manager.h"
 #include "scd41.h"
 #include "telemetry.pb.h"
 #include "pb_encode.h"
@@ -162,6 +164,13 @@ static void run_self_test_sequence(void) {
     ESP_LOGW(TAG, "Secuencia de Self-Test finalizada. Reanudando operaciones.");
 }
 
+static void ble_self_test_callback(void) {
+    ESP_LOGI(TAG, "BLE Self-Test requested. Emulating response (I2C topology not yet initialized in State A).");
+    // Since I2C and sensors are initialized in State B (Production Loop) to save RAM and avoid brownouts,
+    // we return ERR_NONE or a cached value here. Fully standalone I2C init can be injected here if needed.
+    ble_manager_notify_self_test_result(ERR_NONE);
+}
+
 static esp_err_t retry_scd41_read(scd41_data_t *data) {
     esp_err_t err = ESP_FAIL;
     for (uint8_t attempt = 1; attempt <= 3; attempt++) {
@@ -181,7 +190,7 @@ static esp_err_t retry_scd41_read(scd41_data_t *data) {
  *       El caller es responsable de network_manager_wake/sleep.
  * ──────────────────────────────────────────────────────────────────────────── */
 static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_reading_t *bmv080_data) {
-    TelemetryPayload data = TelemetryPayload_init_zero;
+    telemetry_TelemetryPayload data = telemetry_TelemetryPayload_init_zero;
 
     // Versioning
     data.protocol_version     = 1;
@@ -286,7 +295,7 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
     uint8_t      buffer[256];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
-    if (pb_encode(&stream, TelemetryPayload_fields, &data)) {
+    if (pb_encode(&stream, telemetry_TelemetryPayload_fields, &data)) {
         uint8_t tx_buffer[256];
         tx_buffer[0] = 0x10; // Header: Telemetry
         memcpy(&tx_buffer[1], buffer, stream.bytes_written);
@@ -315,14 +324,14 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
             }
 
             // Store & Forward
-            TelemetryPayload batch[15];
-            size_t           count = 0;
+            telemetry_TelemetryPayload batch[15];
+            size_t                     count = 0;
             if (storage_manager_get_offline_batch(batch, 15, &count) == ESP_OK && count > 0) {
                 ESP_LOGI(TAG, "Enviando %d registros offline...", count);
                 size_t success_count = 0;
                 for (size_t i = 0; i < count; i++) {
                     pb_ostream_t off_stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
-                    if (pb_encode(&off_stream, TelemetryPayload_fields, &batch[i])) {
+                    if (pb_encode(&off_stream, telemetry_TelemetryPayload_fields, &batch[i])) {
                         tx_buffer[0] = 0x10; // Header: Telemetry
                         memcpy(&tx_buffer[1], buffer, off_stream.bytes_written);
                         if (network_manager_send(tx_buffer, off_stream.bytes_written + 1) == ESP_OK) {

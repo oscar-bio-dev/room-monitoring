@@ -163,3 +163,50 @@ esp_err_t scd41_set_ambient_pressure(i2c_master_dev_handle_t dev_handle, uint16_
 
     return err;
 }
+
+esp_err_t scd41_perform_self_test(i2c_master_dev_handle_t dev_handle, bool *test_passed) {
+    if (!dev_handle || !test_passed)
+        return ESP_ERR_INVALID_ARG;
+
+    // Comando 0x3639 (Perform Self Test)
+    uint8_t cmd[2]    = {0x36, 0x39};
+    uint8_t rx_buf[3] = {0}; // 1 word (16-bit) + 1 CRC byte
+
+    ESP_LOGI(TAG, "SCD41 Self-Test starting (takes 10s)...");
+
+    // Transmitir comando
+    esp_err_t err = i2c_master_transmit(dev_handle, cmd, 2, 1000 / portTICK_PERIOD_MS);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start self-test: %s", esp_err_to_name(err));
+        *test_passed = false;
+        return err;
+    }
+
+    // Esperar 10 segundos según el datasheet
+    vTaskDelay(pdMS_TO_TICKS(10000));
+
+    // Recibir respuesta
+    err = i2c_master_receive(dev_handle, rx_buf, 3, 1000 / portTICK_PERIOD_MS);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read self-test result: %s", esp_err_to_name(err));
+        *test_passed = false;
+        return err;
+    }
+
+    if (scd41_crc8(rx_buf, 2) != rx_buf[2]) {
+        ESP_LOGE(TAG, "Invalid CRC in self-test result");
+        *test_passed = false;
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    uint16_t result = (rx_buf[0] << 8) | rx_buf[1];
+    *test_passed    = (result == 0x0000);
+
+    if (*test_passed) {
+        ESP_LOGI(TAG, "SCD41 Self-Test passed!");
+    } else {
+        ESP_LOGE(TAG, "SCD41 Self-Test failed with result: 0x%04X", result);
+    }
+
+    return ESP_OK;
+}

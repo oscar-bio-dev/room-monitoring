@@ -3,21 +3,20 @@
 
 #ifndef PB_TELEMETRY_TELEMETRY_PB_H_INCLUDED
 #define PB_TELEMETRY_TELEMETRY_PB_H_INCLUDED
-../ src /
-    telemetry.pb.c
+#include <pb.h>
 
 #if PB_PROTO_HEADER_VERSION != 40
 #error Regenerate this file with the current version of nanopb generator.
 #endif
 
-    /* Enum definitions */
-    /* Estados del Nodo */
-    typedef enum _telemetry_NodeStatus {
-        telemetry_NodeStatus_MONITORING     = 0,
-        telemetry_NodeStatus_CALIBRATING    = 1,
-        telemetry_NodeStatus_SELF_TESTING   = 2,
-        telemetry_NodeStatus_HARDWARE_ERROR = 3
-    } telemetry_NodeStatus;
+/* Enum definitions */
+/* Estados del Nodo */
+typedef enum _telemetry_NodeStatus {
+    telemetry_NodeStatus_MONITORING     = 0,
+    telemetry_NodeStatus_CALIBRATING    = 1,
+    telemetry_NodeStatus_SELF_TESTING   = 2,
+    telemetry_NodeStatus_HARDWARE_ERROR = 3
+} telemetry_NodeStatus;
 
 /* Comandos desde Gateway hacia Nodo */
 typedef enum _telemetry_Command {
