@@ -84,6 +84,7 @@ enum Command {
 // Respuesta del Gateway (ACK Payload)
 message GatewayAck {
     optional Command command = 1;
+    optional uint64 current_epoch_s = 2;
 }
 
 // Reporte de Hardware Self-Test (Activo)

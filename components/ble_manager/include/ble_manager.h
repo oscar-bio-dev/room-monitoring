@@ -12,14 +12,19 @@ extern "C" {
 // Typedef for the callback when self-test is requested via BLE
 typedef void (*ble_self_test_cb_t)(void);
 
+// Typedef for the callback when epoch sync is requested via BLE
+typedef void (*ble_epoch_sync_cb_t)(uint64_t epoch_s);
+
 /**
  * @brief Run the BLE Provisioning loop blocking for up to timeout_sec
  *
  * @param timeout_sec Number of seconds to advertise before giving up.
  * @param self_test_cb Callback function to trigger self test.
+ * @param epoch_sync_cb Callback function to trigger RTC sync.
  * @return true if provisioned successfully, false if timed out.
  */
-bool run_ble_provisioning_loop_blocking(uint32_t timeout_sec, ble_self_test_cb_t self_test_cb);
+bool run_ble_provisioning_loop_blocking(uint32_t timeout_sec, ble_self_test_cb_t self_test_cb,
+                                        ble_epoch_sync_cb_t epoch_sync_cb);
 
 /**
  * @brief Notify the BLE client about the latest self-test result

@@ -28,6 +28,16 @@ esp_err_t rv1805_wrapper_init(i2c_master_bus_handle_t bus_handle, i2c_master_dev
  */
 esp_err_t rv1805_get_time_ns(i2c_master_dev_handle_t rv_dev_handle, int64_t *time_ns);
 
+/**
+ * @brief Checks if the RTC year is >= 2024 to validate if it has been synced
+ */
+bool rv1805_is_time_valid(i2c_master_dev_handle_t rv_dev_handle);
+
+/**
+ * @brief Syncs RV-1805 and ESP32 system time from a UNIX epoch
+ */
+esp_err_t rv1805_sync_from_epoch(i2c_master_dev_handle_t rv_dev_handle, uint64_t epoch_s);
+
 #ifdef __cplusplus
 }
 #endif

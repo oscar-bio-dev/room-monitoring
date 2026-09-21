@@ -3,9 +3,11 @@
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 #include <string.h>
+#include <unistd.h>
 #include "pb_encode.h"
 #include "pb_decode.h"
 #include "driver/gpio.h"
+#include "esp_rom_crc.h"
 
 static const char *TAG = "storage_manager";
 #define MOUNT_POINT "/sdcard"
@@ -17,11 +19,13 @@ static const char *TAG = "storage_manager";
 #define PIN_NUM_CLK 18
 #define PIN_NUM_CS 5
 
+#define STORAGE_MAGIC 0x4242
+
 static sdmmc_card_t *card = NULL;
 
 static esp_err_t mount_sd(void) {
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-        .format_if_mount_failed = true, .max_files = 2, .allocation_unit_size = 16 * 1024};
+        .format_if_mount_failed = false, .max_files = 2, .allocation_unit_size = 16 * 1024};
 
     sdmmc_host_t     host    = SDSPI_HOST_DEFAULT();
     spi_bus_config_t bus_cfg = {
@@ -70,7 +74,7 @@ esp_err_t storage_manager_save_offline(const telemetry_TelemetryPayload *data) {
     if (mount_sd() != ESP_OK)
         return ESP_FAIL;
 
-    uint8_t      buffer[128];
+    uint8_t      buffer[256];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
     if (!pb_encode(&stream, telemetry_TelemetryPayload_fields, data)) {
@@ -86,14 +90,68 @@ esp_err_t storage_manager_save_offline(const telemetry_TelemetryPayload *data) {
         return ESP_FAIL;
     }
 
-    uint8_t size = stream.bytes_written;
-    fwrite(&size, 1, 1, f);
+    uint16_t magic = STORAGE_MAGIC;
+    uint16_t size  = stream.bytes_written;
+    uint32_t crc   = esp_rom_crc32_le(0, (const uint8_t *) &magic, sizeof(magic));
+    crc            = esp_rom_crc32_le(crc, (const uint8_t *) &size, sizeof(size));
+    crc            = esp_rom_crc32_le(crc, buffer, size);
+
+    fwrite(&magic, sizeof(magic), 1, f);
+    fwrite(&size, sizeof(size), 1, f);
     fwrite(buffer, 1, size, f);
+    fwrite(&crc, sizeof(crc), 1, f);
+
+    // Volcado Físico Inmediato para prevenir corrupción antes del Light-Sleep
+    fflush(f);
+    fsync(fileno(f));
+
     fclose(f);
 
-    ESP_LOGI(TAG, "Saved %d bytes offline", size);
+    ESP_LOGI(TAG, "Saved %d bytes offline (CRC: 0x%08X)", size, (unsigned int) crc);
     unmount_sd();
     return ESP_OK;
+}
+
+// Helper para leer registros con validación Magic + CRC32
+static bool read_next_record(FILE *f, uint8_t *payload_buffer, uint16_t max_size, uint16_t *out_size) {
+    uint8_t  byte;
+    uint16_t magic_scan = 0;
+
+    // Byte-by-byte scan for Magic Word (0x4242)
+    while (fread(&byte, 1, 1, f) == 1) {
+        magic_scan = (magic_scan >> 8) | (byte << 8); // Little Endian scan
+        if (magic_scan == STORAGE_MAGIC) {
+            uint16_t size;
+            if (fread(&size, sizeof(size), 1, f) != 1)
+                continue;
+
+            if (size > max_size) {
+                ESP_LOGW(TAG, "Payload size %d exceeds buffer, skipping", size);
+                continue;
+            }
+
+            if (fread(payload_buffer, 1, size, f) != size)
+                continue;
+
+            uint32_t read_crc;
+            if (fread(&read_crc, sizeof(read_crc), 1, f) != 1)
+                continue;
+
+            uint16_t magic_ref = STORAGE_MAGIC;
+            uint32_t calc_crc  = esp_rom_crc32_le(0, (const uint8_t *) &magic_ref, sizeof(magic_ref));
+            calc_crc           = esp_rom_crc32_le(calc_crc, (const uint8_t *) &size, sizeof(size));
+            calc_crc           = esp_rom_crc32_le(calc_crc, payload_buffer, size);
+
+            if (read_crc == calc_crc) {
+                *out_size = size;
+                return true; // Record is valid
+            } else {
+                ESP_LOGW(TAG, "CRC mismatch (read 0x%08X, calc 0x%08X), skipping", (unsigned int) read_crc,
+                         (unsigned int) calc_crc);
+            }
+        }
+    }
+    return false; // EOF or no valid record found
 }
 
 esp_err_t storage_manager_get_offline_batch(telemetry_TelemetryPayload *batch, size_t max_items, size_t *out_count) {
@@ -107,13 +165,10 @@ esp_err_t storage_manager_get_offline_batch(telemetry_TelemetryPayload *batch, s
         return ESP_OK; // No file, no items
     }
 
-    uint8_t size;
-    uint8_t buffer[128];
-    while (*out_count < max_items && fread(&size, 1, 1, f) == 1) {
-        if (fread(buffer, 1, size, f) != size) {
-            break; // Corrupted EOF
-        }
+    uint16_t size;
+    uint8_t  buffer[256];
 
+    while (*out_count < max_items && read_next_record(f, buffer, sizeof(buffer), &size)) {
         pb_istream_t stream = pb_istream_from_buffer(buffer, size);
         if (pb_decode(&stream, telemetry_TelemetryPayload_fields, &batch[*out_count])) {
             (*out_count)++;
@@ -144,24 +199,31 @@ esp_err_t storage_manager_clear_offline_batch(size_t items_to_remove) {
         return ESP_FAIL;
     }
 
-    uint8_t size;
-    uint8_t buffer[128];
-    size_t  skipped = 0;
+    uint16_t size;
+    uint8_t  buffer[256];
+    size_t   skipped = 0;
 
-    // Skip items
-    while (skipped < items_to_remove && fread(&size, 1, 1, f) == 1) {
-        if (fread(buffer, 1, size, f) != size)
-            break;
-        skipped++;
+    // Parse and either skip or copy records
+    while (read_next_record(f, buffer, sizeof(buffer), &size)) {
+        if (skipped < items_to_remove) {
+            skipped++; // Skip this valid record
+        } else {
+            // Copy remaining valid records
+            uint16_t magic    = STORAGE_MAGIC;
+            uint32_t calc_crc = esp_rom_crc32_le(0, (const uint8_t *) &magic, sizeof(magic));
+            calc_crc          = esp_rom_crc32_le(calc_crc, (const uint8_t *) &size, sizeof(size));
+            calc_crc          = esp_rom_crc32_le(calc_crc, buffer, size);
+
+            fwrite(&magic, sizeof(magic), 1, ftmp);
+            fwrite(&size, sizeof(size), 1, ftmp);
+            fwrite(buffer, 1, size, ftmp);
+            fwrite(&calc_crc, sizeof(calc_crc), 1, ftmp);
+        }
     }
 
-    // Copy remaining items
-    while (fread(&size, 1, 1, f) == 1) {
-        if (fread(buffer, 1, size, f) != size)
-            break;
-        fwrite(&size, 1, 1, ftmp);
-        fwrite(buffer, 1, size, ftmp);
-    }
+    // Force flush the tmp file
+    fflush(ftmp);
+    fsync(fileno(ftmp));
 
     fclose(f);
     fclose(ftmp);

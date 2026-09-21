@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-20
+### Added
+- **Sincronización Temporal (Epoch) vía BLE:** Nueva característica GATT `CHAR_EPOCH_SYNC` (UUID: `0xFF05`) que permite a la App Móvil inyectar la hora Unix de 64-bits. Este valor se almacena y se inyecta al RTC RV-1805 al finalizar la configuración, previniendo cuellos de botella de energía (brownouts).
+- **Traducción BCD y Posix (`rv1805_wrapper.c`):** Rutinas de traducción bi-direccional (`dec_to_bcd`, `bcd_to_dec`) para interactuar a bajo nivel con los registros físicos del chip y actualización global en RTOS con `settimeofday()`.
+- **Evolución Protobuf:** Añadido campo `current_epoch_s` al mensaje `GatewayAck` en `telemetry.proto` estableciendo el contrato para sincronización pasiva contra el Edge Gateway.
+- **Resiliencia de Telemetría (Anti Poison-Pill):** Lógica `rv1805_is_time_valid()` introducida. Si el RTC arroja años inválidos (< 2024), el nodo impone `measured_at_ms = 0` y emite un bit de error explícito `ERR_RTC_RV1805` para forzar que el backend estampe la hora de recepción.
+- **MicroSD Store-and-Forward de Alta Confiabilidad (AOL):** Refactor integral en `storage_manager.c`. Transición de un archivo binario frágil a un modelo robusto de tipo *Append-Only Log*.
+  - Implementación de un *Magic Word* de 16-bits (`0x4242`) que antecede a las cargas útiles.
+  - Buffer de lectura y serialización expandido de 128B a 256B (acomodando el nuevo Payload Protobuf de >98 bytes).
+  - Verificación `CRC32` a nivel de registro que permite al lector purgar y omitir bytes corruptos sin desechar todo el log, eliminando la vulnerabilidad del `format_if_mount_failed=true`.
+
+### Fixed
+- **Desbordamiento IRAM 0_0_seg:** Liberación de >736 bytes críticos en la IRAM estática deshabilitando la optimización agresiva del Wi-Fi RX/TX (`CONFIG_ESP_WIFI_IRAM_OPT=n`), lo que resolvió el conflicto de enlazado al activar NimBLE en conjunto con BSEC y Wi-Fi en ESP-IDF v5.3.
+- **Desbordamiento de Partición de Aplicación:** Ampliación del esquema de particionamiento a 1.5MB mediante `CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y` resolviendo el crecimiento geométrico del binario.
+
 ## [0.10.0] - 2026-09-20
 ### Added
 - **Aprovisionamiento BLE (NimBLE GATT Server):** El nodo arranca en *Estado A* emitiendo una señal BLE (UUID primario: `0xFF00`). Permite configuración inicial usando una App móvil (ej. nRF Connect).

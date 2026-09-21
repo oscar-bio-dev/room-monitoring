@@ -45,7 +45,8 @@
 
 static const char *TAG = "room-monitoring";
 
-uint32_t current_errors = ERR_NONE;
+uint32_t        current_errors     = ERR_NONE;
+static uint64_t pending_epoch_sync = 0;
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Estado Persistente
@@ -171,6 +172,11 @@ static void ble_self_test_callback(void) {
     ble_manager_notify_self_test_result(ERR_NONE);
 }
 
+static void ble_epoch_sync_callback(uint64_t epoch_s) {
+    ESP_LOGI(TAG, "BLE Epoch Sync callback. Storing epoch %llu for I2C init.", (unsigned long long) epoch_s);
+    pending_epoch_sync = epoch_s;
+}
+
 static esp_err_t retry_scd41_read(scd41_data_t *data) {
     esp_err_t err = ESP_FAIL;
     for (uint8_t attempt = 1; attempt <= 3; attempt++) {
@@ -205,7 +211,14 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
     // Timestamp
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    data.measured_at_ms     = ((uint64_t) tv.tv_sec * 1000ULL) + ((uint64_t) tv.tv_usec / 1000ULL);
+
+    if (rv1805_dev && !rv1805_is_time_valid(rv1805_dev)) {
+        current_errors |= ERR_RTC_RV1805;
+        data.measured_at_ms = 0;
+    } else {
+        current_errors &= ~ERR_RTC_RV1805;
+        data.measured_at_ms = ((uint64_t) tv.tv_sec * 1000ULL) + ((uint64_t) tv.tv_usec / 1000ULL);
+    }
     data.has_measured_at_ms = true;
 
     // BME688 — Validación de rango físico (Anti Poison-Pill)
@@ -874,6 +887,12 @@ static void sensor_orchestration_task(void *pvParameters) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RV1805 init failed! Timekeeping degraded.");
     } else {
+        if (pending_epoch_sync > 0) {
+            ESP_LOGI(TAG, "Applying pending epoch sync to RTC: %llu", (unsigned long long) pending_epoch_sync);
+            rv1805_sync_from_epoch(rv1805_dev, pending_epoch_sync);
+            pending_epoch_sync = 0; // Clear it
+        }
+
         int64_t rv_time = 0;
         if (rv1805_get_time_ns(rv1805_dev, &rv_time) == ESP_OK) {
             struct timeval tv;
@@ -959,6 +978,13 @@ void app_main(void) {
 
     ESP_LOGI(TAG, "Delaying 1000ms for sensors to release I2C bus...");
     vTaskDelay(pdMS_TO_TICKS(1000));
+
+#ifndef CONFIG_ENABLE_DEEP_SLEEP
+    ESP_LOGI(TAG, "🚀 BLE Provisioning Phase (State A)");
+    // 300 segundos (5 minutos) de Timeout. Si no se provee, pasamos a State B.
+    run_ble_provisioning_loop_blocking(300, ble_self_test_callback, ble_epoch_sync_callback);
+    ESP_LOGI(TAG, "✅ Entering State B: I2C Orchestration and Sensors");
+#endif
 
     i2c_master_bus_handle_t bus_handle;
     if (i2c_bus_init(&bus_handle) != ESP_OK) {
