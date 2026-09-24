@@ -100,6 +100,8 @@ typedef struct _telemetry_TelemetryPayload {
 typedef struct _telemetry_GatewayAck {
     bool              has_command;
     telemetry_Command command;
+    bool              has_current_epoch_s;
+    uint64_t          current_epoch_s;
 } telemetry_GatewayAck;
 
 /* Reporte de Hardware Self-Test (Activo) */
@@ -139,7 +141,7 @@ extern "C" {
             0, false, 0, false, 0, false, 0, false, 0, false, _telemetry_NodeStatus_MIN                                \
     }
 #define telemetry_GatewayAck_init_default                                                                              \
-    { false, _telemetry_Command_MIN }
+    { false, _telemetry_Command_MIN, false, 0 }
 #define telemetry_DiagnosticReport_init_default                                                                        \
     { false, 0, false, 0, false, 0, false, 0 }
 #define telemetry_TelemetryPayload_init_zero                                                                           \
@@ -149,7 +151,7 @@ extern "C" {
             0, false, 0, false, 0, false, 0, false, 0, false, _telemetry_NodeStatus_MIN                                \
     }
 #define telemetry_GatewayAck_init_zero                                                                                 \
-    { false, _telemetry_Command_MIN }
+    { false, _telemetry_Command_MIN, false, 0 }
 #define telemetry_DiagnosticReport_init_zero                                                                           \
     { false, 0, false, 0, false, 0, false, 0 }
 
@@ -182,6 +184,7 @@ extern "C" {
 #define telemetry_TelemetryPayload_system_error_bitmask_tag 32
 #define telemetry_TelemetryPayload_status_tag 33
 #define telemetry_GatewayAck_command_tag 1
+#define telemetry_GatewayAck_current_epoch_s_tag 2
 #define telemetry_DiagnosticReport_system_error_bitmask_tag 1
 #define telemetry_DiagnosticReport_scd41_passed_tag 2
 #define telemetry_DiagnosticReport_bmv080_passed_tag 3
@@ -219,7 +222,9 @@ extern "C" {
 #define telemetry_TelemetryPayload_CALLBACK NULL
 #define telemetry_TelemetryPayload_DEFAULT NULL
 
-#define telemetry_GatewayAck_FIELDLIST(X, a) X(a, STATIC, OPTIONAL, UENUM, command, 1)
+#define telemetry_GatewayAck_FIELDLIST(X, a)                                                                           \
+    X(a, STATIC, OPTIONAL, UENUM, command, 1)                                                                          \
+    X(a, STATIC, OPTIONAL, UINT64, current_epoch_s, 2)
 #define telemetry_GatewayAck_CALLBACK NULL
 #define telemetry_GatewayAck_DEFAULT NULL
 
@@ -243,7 +248,7 @@ extern const pb_msgdesc_t telemetry_DiagnosticReport_msg;
 /* Maximum encoded size of messages (where known) */
 #define TELEMETRY_TELEMETRY_PB_H_MAX_SIZE telemetry_TelemetryPayload_size
 #define telemetry_DiagnosticReport_size 12
-#define telemetry_GatewayAck_size 2
+#define telemetry_GatewayAck_size 13
 #define telemetry_TelemetryPayload_size 152
 
 #ifdef __cplusplus

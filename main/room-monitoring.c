@@ -45,8 +45,7 @@
 
 static const char *TAG = "room-monitoring";
 
-uint32_t        current_errors     = ERR_NONE;
-static uint64_t pending_epoch_sync = 0;
+uint32_t current_errors = ERR_NONE;
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Estado Persistente
@@ -163,18 +162,6 @@ static void run_self_test_sequence(void) {
     }
 
     ESP_LOGW(TAG, "Secuencia de Self-Test finalizada. Reanudando operaciones.");
-}
-
-static void ble_self_test_callback(void) {
-    ESP_LOGI(TAG, "BLE Self-Test requested. Emulating response (I2C topology not yet initialized in State A).");
-    // Since I2C and sensors are initialized in State B (Production Loop) to save RAM and avoid brownouts,
-    // we return ERR_NONE or a cached value here. Fully standalone I2C init can be injected here if needed.
-    ble_manager_notify_self_test_result(ERR_NONE);
-}
-
-static void ble_epoch_sync_callback(uint64_t epoch_s) {
-    ESP_LOGI(TAG, "BLE Epoch Sync callback. Storing epoch %llu for I2C init.", (unsigned long long) epoch_s);
-    pending_epoch_sync = epoch_s;
 }
 
 static esp_err_t retry_scd41_read(scd41_data_t *data) {
@@ -316,14 +303,25 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
         if (network_manager_send(tx_buffer, stream.bytes_written + 1) == ESP_OK) {
             ESP_LOGI(TAG, "📡 Telemetría enviada (%d bytes)", (int) stream.bytes_written + 1);
 
-            // Ventana de Recepción Downlink (200ms)
+            // Ventana de Recepción Downlink (50ms) - Downlink Spooling Fast-ACK
             uint8_t rx_buf[250];
             size_t  rx_len = 0;
-            if (network_manager_receive_cmd(rx_buf, &rx_len, 200) == ESP_OK) {
+            if (network_manager_receive_cmd(rx_buf, &rx_len, 50) == ESP_OK) {
                 if (rx_len > 0 && rx_buf[0] == 0x20) { // Header: GatewayAck
                     telemetry_GatewayAck ack       = telemetry_GatewayAck_init_zero;
                     pb_istream_t         rx_stream = pb_istream_from_buffer(&rx_buf[1], rx_len - 1);
                     if (pb_decode(&rx_stream, telemetry_GatewayAck_fields, &ack)) {
+
+                        // 1. Sincronización Temporal Pasiva
+                        if (ack.has_current_epoch_s && ack.current_epoch_s > 1700000000) {
+                            ESP_LOGI(TAG, "⏱️ Sincronizando Epoch (Gateway Downlink Spooling): %llu",
+                                     (unsigned long long) ack.current_epoch_s);
+                            if (rv1805_dev) {
+                                rv1805_sync_from_epoch(rv1805_dev, ack.current_epoch_s);
+                            }
+                        }
+
+                        // 2. Ejecución de Comandos
                         if (ack.has_command && ack.command == telemetry_Command_CMD_RUN_SELF_TEST) {
                             ESP_LOGW(TAG, "⚠️ CMD_RUN_SELF_TEST interceptado. Desviando ejecución...");
                             run_self_test_sequence();
@@ -887,11 +885,6 @@ static void sensor_orchestration_task(void *pvParameters) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "RV1805 init failed! Timekeeping degraded.");
     } else {
-        if (pending_epoch_sync > 0) {
-            ESP_LOGI(TAG, "Applying pending epoch sync to RTC: %llu", (unsigned long long) pending_epoch_sync);
-            rv1805_sync_from_epoch(rv1805_dev, pending_epoch_sync);
-            pending_epoch_sync = 0; // Clear it
-        }
 
         int64_t rv_time = 0;
         if (rv1805_get_time_ns(rv1805_dev, &rv_time) == ESP_OK) {
@@ -982,7 +975,7 @@ void app_main(void) {
 #ifndef CONFIG_ENABLE_DEEP_SLEEP
     ESP_LOGI(TAG, "🚀 BLE Provisioning Phase (State A)");
     // 300 segundos (5 minutos) de Timeout. Si no se provee, pasamos a State B.
-    run_ble_provisioning_loop_blocking(300, ble_self_test_callback, ble_epoch_sync_callback);
+    run_ble_provisioning_loop_blocking(300);
     ESP_LOGI(TAG, "✅ Entering State B: I2C Orchestration and Sensors");
 #endif
 

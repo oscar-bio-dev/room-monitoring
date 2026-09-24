@@ -13,20 +13,15 @@
 
 static const char *TAG = "ble_manager";
 
-static uint8_t             own_addr_type;
-static uint16_t            self_test_val_handle;
-static ble_self_test_cb_t  user_self_test_cb    = NULL;
-static ble_epoch_sync_cb_t user_epoch_sync_cb   = NULL;
-static bool                is_ble_connected     = false;
-static bool                is_provisioned_event = false;
+static uint8_t own_addr_type;
+static bool    is_ble_connected     = false;
+static bool    is_provisioned_event = false;
 
 // Custom Service: 0xFF00
-static const ble_uuid16_t gatt_svr_svc_uuid    = BLE_UUID16_INIT(0xFF00);
-static const ble_uuid16_t gatt_mac_uuid        = BLE_UUID16_INIT(0xFF01);
-static const ble_uuid16_t gatt_interval_uuid   = BLE_UUID16_INIT(0xFF02);
-static const ble_uuid16_t gatt_frc_uuid        = BLE_UUID16_INIT(0xFF03);
-static const ble_uuid16_t gatt_self_test_uuid  = BLE_UUID16_INIT(0xFF04);
-static const ble_uuid16_t gatt_epoch_sync_uuid = BLE_UUID16_INIT(0xFF05);
+static const ble_uuid16_t gatt_svr_svc_uuid  = BLE_UUID16_INIT(0xFF00);
+static const ble_uuid16_t gatt_mac_uuid      = BLE_UUID16_INIT(0xFF01);
+static const ble_uuid16_t gatt_interval_uuid = BLE_UUID16_INIT(0xFF02);
+static const ble_uuid16_t gatt_frc_uuid      = BLE_UUID16_INIT(0xFF03);
 
 static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struct ble_gatt_access_ctxt *ctxt,
                                void *arg);
@@ -47,17 +42,6 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
                                                        },
                                                        {
                                                            .uuid      = &gatt_frc_uuid.u,
-                                                           .access_cb = gatt_svr_chr_access,
-                                                           .flags     = BLE_GATT_CHR_F_WRITE,
-                                                       },
-                                                       {
-                                                           .uuid       = &gatt_self_test_uuid.u,
-                                                           .access_cb  = gatt_svr_chr_access,
-                                                           .flags      = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_NOTIFY,
-                                                           .val_handle = &self_test_val_handle,
-                                                       },
-                                                       {
-                                                           .uuid      = &gatt_epoch_sync_uuid.u,
                                                            .access_cb = gatt_svr_chr_access,
                                                            .flags     = BLE_GATT_CHR_F_WRITE,
                                                        },
@@ -122,33 +106,6 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struc
                 return 0;
             }
         }
-    } else if (ble_uuid_cmp(uuid, &gatt_self_test_uuid.u) == 0) {
-        if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
-            uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
-            if (len == 1) {
-                uint8_t val;
-                os_mbuf_copydata(ctxt->om, 0, 1, &val);
-                if (val == 0x01 && user_self_test_cb) {
-                    ESP_LOGI(TAG, "Self-Test triggered via BLE");
-                    user_self_test_cb();
-                }
-                return 0;
-            }
-        }
-    } else if (ble_uuid_cmp(uuid, &gatt_epoch_sync_uuid.u) == 0) {
-        if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
-            uint16_t len = OS_MBUF_PKTLEN(ctxt->om);
-            if (len == 8) {
-                uint64_t epoch_s;
-                os_mbuf_copydata(ctxt->om, 0, 8, &epoch_s);
-                if (user_epoch_sync_cb) {
-                    ESP_LOGI(TAG, "Epoch Sync triggered via BLE: %llu", (unsigned long long) epoch_s);
-                    user_epoch_sync_cb(epoch_s);
-                }
-                return 0;
-            }
-            return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-        }
     }
 
     return BLE_ATT_ERR_UNLIKELY;
@@ -209,24 +166,7 @@ static void ble_host_task(void *param) {
     nimble_port_freertos_deinit();
 }
 
-void ble_manager_notify_self_test_result(uint32_t error_bitmask) {
-    if (is_ble_connected) {
-        struct os_mbuf *om = ble_hs_mbuf_from_flat(&error_bitmask, sizeof(error_bitmask));
-        int             rc = ble_gatts_notify_custom(
-            1, self_test_val_handle,
-            om); // assuming conn_handle is 1 for simplification, in real scenario we should track it
-        if (rc == 0) {
-            ESP_LOGI(TAG, "Notified Self-Test result: 0x%08X", (unsigned int) error_bitmask);
-        } else {
-            ESP_LOGE(TAG, "Failed to notify: %d", rc);
-        }
-    }
-}
-
-bool run_ble_provisioning_loop_blocking(uint32_t timeout_sec, ble_self_test_cb_t self_test_cb,
-                                        ble_epoch_sync_cb_t epoch_sync_cb) {
-    user_self_test_cb    = self_test_cb;
-    user_epoch_sync_cb   = epoch_sync_cb;
+bool run_ble_provisioning_loop_blocking(uint32_t timeout_sec) {
     is_provisioned_event = false;
     is_ble_connected     = false;
 

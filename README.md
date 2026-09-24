@@ -191,11 +191,13 @@ Este proyecto sigue políticas estrictas de gobierno:
 - [x] **Fase 3c:** Smart Light-Sleep implementado (2 modos: 5s Continuous / 5min ULP con `esp_light_sleep_start()` y event loop dinámico BSEC-synced).
 - [x] **Fase 3d:** BMV080 Industrial Optimization — Number concentration (particles/m³), obstruction detection, laser lifecycle `start()/stop()`, payload expandido a 98 bytes.
 - [x] **Fase 3e:** Transporte Bidireccional y Mailbox Asíncrono — Byte de Cabecera (0x10, 0x11, 0x20), espera de ACK, y Secuenciador de Self-Test Activo a nivel I2C en respuesta a comandos del Gateway.
-- [x] **Fase 3f:** Aprovisionamiento BLE (NimBLE GATT Server) y Persistencia NVS. Estado Excluyente A/B (Boot and Release). Timeout de 5 minutos y características: MAC, Intervalo, FRC, Self-Test.
+- [x] **Fase 3f:** Aprovisionamiento BLE (NimBLE GATT Server) y Persistencia NVS. Estado Excluyente A/B (Boot and Release). Timeout de 5 minutos y características: MAC, Intervalo, FRC. (Self-Test y Epoch migrados a arquitectura Cloud-to-Edge).
 - [x] **Fase 3g:** Resiliencia de Caja Negra (SD Card). Refactor a modelo Append-Only Log con *Magic Word* (`0x4242`), buffer dinámico de 256B y `CRC32` validado para lectura/escritura corrupta.
 - [x] **Fase 3h:** Sincronización Temporal Híbrida. Inyección Epoch vía BLE (`CHAR_EPOCH_SYNC`), conversión BCD RV-1805 y mitigación de Poison-Pills mediante validación estricta de año (>2024).
-- [ ] **Fase 4:** Gateway Criptográfico Edge (ESP32-P4) con conectividad a Google Cloud.
-- [ ] **Fase 5:** Inteligencia Embebida BSEC 3.0 y TinyML para Clasificación Química.
+- [x] **Fase 3i:** Optimización de Batería "Fast-ACK". Reducción de la ventana de RX de 200ms a 50ms, aprovechando la respuesta instantánea (<20ms) de la arquitectura *Downlink Spooling* del co-procesador C6 en el Gateway.
+- [ ] **Fase 4:** (Integración Ecosistema) Pruebas End-to-End (E2E) con el Edge-Telemetry-Gateway. Validación de la inyección asíncrona de comandos (`CMD_RUN_SELF_TEST`) y sincronización automática de Epoch en el `GatewayAck`.
+- [ ] **Fase 5:** (Aprovisionamiento Enterprise) Validación E2E con la App Móvil (Setae Connect). Lectura óptica de Código QR y configuración Zero-Touch vía BLE (MAC e inyección del Epoch desde el smartphone del operario).
+- [ ] **Fase 6:** Inteligencia Embebida BSEC 3.0 y TinyML. Despliegue de redes neuronales ligeras para Clasificación Química en el Edge (Ej. detección discriminada de tipos de VOCs o gases nocivos).
 
 ---
 
