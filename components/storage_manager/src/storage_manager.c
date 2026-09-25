@@ -83,11 +83,28 @@ esp_err_t storage_manager_save_offline(const telemetry_TelemetryPayload *data) {
         return ESP_FAIL;
     }
 
+#define OFFLINE_BAK MOUNT_POINT "/offline_bak.dat"
+
     FILE *f = fopen(OFFLINE_FILE, "ab");
     if (!f) {
         ESP_LOGE(TAG, "Failed to open file for appending");
         unmount_sd();
         return ESP_FAIL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    if (file_size >= 256 * 1024) {
+        ESP_LOGW(TAG, "Offline file exceeds 256KB, rotating to backup...");
+        fclose(f);
+        remove(OFFLINE_BAK);
+        rename(OFFLINE_FILE, OFFLINE_BAK);
+        f = fopen(OFFLINE_FILE, "ab");
+        if (!f) {
+            ESP_LOGE(TAG, "Failed to create new offline file after rotation");
+            unmount_sd();
+            return ESP_FAIL;
+        }
     }
 
     uint16_t magic = STORAGE_MAGIC;

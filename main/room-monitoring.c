@@ -537,14 +537,21 @@ static void run_production_cycle(bool bme_initialized) {
                 int8_t r = bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res,
                                                 &rtc_eco2, &rtc_bvoc, &rtc_tvoc);
                 if (r == 0) {
+                    current_errors &= ~ERR_BME688;
                     ESP_LOGD(TAG, "BSEC tick: IAQ=%.1f Acc=%d T=%.1f", rtc_iaq, rtc_acc, rtc_temp);
+                } else if (r != -2) {
+                    current_errors |= ERR_BME688;
                 }
             }
 
             // 2. Purgar FIFO del BMV080
             bmv080_reading_t bmv080_data = {0};
             if (bmv080_active) {
-                bmv080_wrapper_read_full(&bmv080_data);
+                if (bmv080_wrapper_read_full(&bmv080_data) == 0) {
+                    current_errors &= ~ERR_BMV080;
+                } else {
+                    current_errors |= ERR_BMV080;
+                }
             }
 
             scd41_tick_counter++;
@@ -562,9 +569,13 @@ static void run_production_cycle(bool bme_initialized) {
                     if (rtc_pressure > 300.0f && rtc_pressure < 1200.0f) {
                         scd41_set_ambient_pressure(scd41_dev, (uint16_t) rtc_pressure);
                     }
-                    retry_scd41_read(&scd41_data);
-                    ESP_LOGI(TAG, "SCD41   -> CO2: %u ppm | Temp: %.2f C | Hum: %.2f %%", scd41_data.co2,
-                             scd41_data.temperature, scd41_data.humidity);
+                    if (retry_scd41_read(&scd41_data) == ESP_OK) {
+                        current_errors &= ~ERR_SCD41;
+                        ESP_LOGI(TAG, "SCD41   -> CO2: %u ppm | Temp: %.2f C | Hum: %.2f %%", scd41_data.co2,
+                                 scd41_data.temperature, scd41_data.humidity);
+                    } else {
+                        current_errors |= ERR_SCD41;
+                    }
                 }
 
                 // Log completo
@@ -620,6 +631,7 @@ static void run_production_cycle(bool bme_initialized) {
                 int8_t r = bme688_bsec_read_iaq(&rtc_iaq, &rtc_acc, &rtc_temp, &rtc_hum, &rtc_pressure, &rtc_gas_res,
                                                 &rtc_eco2, &rtc_bvoc, &rtc_tvoc);
                 if (r == 0) {
+                    current_errors &= ~ERR_BME688;
                     ESP_LOGI(TAG,
                              "BME688  ✅ BSEC ULP | IAQ: %.1f (Acc: %d) | T: %.1f | H: %.1f | P: %.1f hPa | Gas: "
                              "%.0f Ω | eCO2: %.0f ppm",
@@ -627,6 +639,7 @@ static void run_production_cycle(bool bme_initialized) {
                 } else if (r == -2) {
                     ESP_LOGI(TAG, "BME688  ⏳ No trigger (cached: IAQ=%.1f T=%.1f)", rtc_iaq, rtc_temp);
                 } else {
+                    current_errors |= ERR_BME688;
                     ESP_LOGE(TAG, "BME688  ❌ BSEC error");
                 }
             }
@@ -669,9 +682,11 @@ static void run_production_cycle(bool bme_initialized) {
             /* ── PASO 5: Recolección de Datos ────────────────────────── */
             scd41_data_t scd41_data = {0};
             if (retry_scd41_read(&scd41_data) == ESP_OK) {
+                current_errors &= ~ERR_SCD41;
                 ESP_LOGI(TAG, "SCD41   -> CO2: %u ppm | Temp: %.2f C | Hum: %.2f %%", scd41_data.co2,
                          scd41_data.temperature, scd41_data.humidity);
             } else {
+                current_errors |= ERR_SCD41;
                 ESP_LOGW(TAG, "SCD41   -> Read failed, using zeros");
                 scd41_data.co2 = 0;
             }
@@ -679,12 +694,17 @@ static void run_production_cycle(bool bme_initialized) {
             bmv080_reading_t bmv080_data = {0};
             if (bmv080_active) {
                 int bmv_rslt = bmv080_wrapper_read_full(&bmv080_data);
-                if (bmv_rslt == 0 && (bmv080_data.pm1_mass > 0 || bmv080_data.pm2_5_mass > 0)) {
-                    ESP_LOGI(TAG,
-                             "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3 | "
-                             "#1: %.0f | #2.5: %.0f | #10: %.0f /m3",
-                             bmv080_data.pm1_mass, bmv080_data.pm2_5_mass, bmv080_data.pm10_mass, bmv080_data.pm1_count,
-                             bmv080_data.pm2_5_count, bmv080_data.pm10_count);
+                if (bmv_rslt == 0) {
+                    current_errors &= ~ERR_BMV080;
+                    if (bmv080_data.pm1_mass > 0 || bmv080_data.pm2_5_mass > 0) {
+                        ESP_LOGI(TAG,
+                                 "BMV080  -> PM1: %.2f | PM2.5: %.2f | PM10: %.2f ug/m3 | "
+                                 "#1: %.0f | #2.5: %.0f | #10: %.0f /m3",
+                                 bmv080_data.pm1_mass, bmv080_data.pm2_5_mass, bmv080_data.pm10_mass,
+                                 bmv080_data.pm1_count, bmv080_data.pm2_5_count, bmv080_data.pm10_count);
+                    }
+                } else {
+                    current_errors |= ERR_BMV080;
                 }
                 if (bmv080_data.is_obstructed) {
                     ESP_LOGW(TAG, "BMV080  ⚠️ OBSTRUCTED — lente sucia");
