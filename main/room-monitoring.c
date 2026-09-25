@@ -22,6 +22,7 @@
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
+#include "esp_random.h"
 #include "esp_log.h"
 
 // Componentes modulares
@@ -300,6 +301,8 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
         tx_buffer[0] = 0x10; // Header: Telemetry
         memcpy(&tx_buffer[1], buffer, stream.bytes_written);
 
+        bool gateway_accepted = false;
+
         if (network_manager_send(tx_buffer, stream.bytes_written + 1) == ESP_OK) {
             ESP_LOGI(TAG, "📡 Telemetría enviada (%d bytes)", (int) stream.bytes_written + 1);
 
@@ -308,6 +311,7 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
             size_t  rx_len = 0;
             if (network_manager_receive_cmd(rx_buf, &rx_len, 50) == ESP_OK) {
                 if (rx_len > 0 && rx_buf[0] == 0x20) { // Header: GatewayAck
+                    gateway_accepted               = true;
                     telemetry_GatewayAck ack       = telemetry_GatewayAck_init_zero;
                     pb_istream_t         rx_stream = pb_istream_from_buffer(&rx_buf[1], rx_len - 1);
                     if (pb_decode(&rx_stream, telemetry_GatewayAck_fields, &ack)) {
@@ -333,7 +337,9 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
                     }
                 }
             }
+        }
 
+        if (gateway_accepted) {
             // Store & Forward
             telemetry_TelemetryPayload batch[15];
             size_t                     count = 0;
@@ -345,7 +351,17 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
                     if (pb_encode(&off_stream, telemetry_TelemetryPayload_fields, &batch[i])) {
                         tx_buffer[0] = 0x10; // Header: Telemetry
                         memcpy(&tx_buffer[1], buffer, off_stream.bytes_written);
+
+                        bool batch_ack = false;
                         if (network_manager_send(tx_buffer, off_stream.bytes_written + 1) == ESP_OK) {
+                            uint8_t rx_b[250];
+                            size_t  r_len;
+                            if (network_manager_receive_cmd(rx_b, &r_len, 50) == ESP_OK && rx_b[0] == 0x20) {
+                                batch_ack = true;
+                            }
+                        }
+
+                        if (batch_ack) {
                             success_count++;
                         } else {
                             break;
@@ -357,7 +373,7 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
                 }
             }
         } else {
-            ESP_LOGW(TAG, "⚠️ ESP-NOW falló. Guardando en Caja Negra...");
+            ESP_LOGW(TAG, "⚠️ Sin GatewayAck (0x20). Guardando en Caja Negra...");
             storage_manager_save_offline(&data);
         }
     } else {
@@ -955,6 +971,11 @@ static void sensor_orchestration_task(void *pvParameters) {
  * Punto de Entrada
  * ──────────────────────────────────────────────────────────────────────────── */
 void app_main(void) {
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+        // Cold boot: initialize node_sequence randomly to avoid ID collisions across power cycles
+        node_sequence = esp_random();
+    }
+
 #ifdef CONFIG_ENABLE_DEEP_SLEEP
     debug_boot_counter++;
     ESP_LOGW(TAG, "🔢 DEBUG boot_counter=%d | Wake cause: %d, reset reason: %d, free heap: %u bytes",

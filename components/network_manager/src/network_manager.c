@@ -71,7 +71,7 @@ void network_manager_init(void) {
     }
 
     if (!rx_command_queue) {
-        rx_command_queue = xQueueCreate(1, sizeof(rx_packet_t));
+        rx_command_queue = xQueueCreate(5, sizeof(rx_packet_t));
     }
 
     /* Parsear la MAC del Gateway desde Kconfig */
@@ -154,6 +154,10 @@ void network_manager_sleep(void) {
 
 esp_err_t network_manager_send(const uint8_t *payload, size_t len) {
     xEventGroupClearBits(esp_now_event_group, SEND_SUCCESS_BIT | SEND_FAIL_BIT);
+
+    if (rx_command_queue) {
+        xQueueReset(rx_command_queue);
+    }
 
     esp_err_t err = esp_now_send(gateway_mac, payload, len);
     if (err != ESP_OK) {
