@@ -195,7 +195,9 @@ Este proyecto sigue políticas estrictas de gobierno:
 - [x] **Fase 3g:** Resiliencia de Caja Negra (SD Card). Refactor a modelo Append-Only Log con *Magic Word* (`0x4242`), buffer dinámico de 256B y `CRC32` validado para lectura/escritura corrupta.
 - [x] **Fase 3h:** Sincronización Temporal Híbrida. Inyección Epoch vía BLE (`CHAR_EPOCH_SYNC`), conversión BCD RV-1805 y mitigación de Poison-Pills mediante validación estricta de año (>2024).
 - [x] **Fase 3i:** Optimización de Batería "Fast-ACK". Reducción de la ventana de RX de 200ms a 50ms, aprovechando la respuesta instantánea (<20ms) de la arquitectura *Downlink Spooling* del co-procesador C6 en el Gateway.
-- [ ] **Fase 4:** (Integración Ecosistema) Pruebas End-to-End (E2E) con el Edge-Telemetry-Gateway. Validación de la inyección asíncrona de comandos (`CMD_RUN_SELF_TEST`) y sincronización automática de Epoch en el `GatewayAck`.
+- [x] **Fase 4a:** (Auditoría Técnica Bloque 1) Implementación de Resiliencia de Red. Confirmación durable (Cloud-Accepted) exigiendo el `GatewayAck` (0x20) antes de purgar la MicroSD. Idempotencia global garantizada inicializando `node_sequence` aleatoriamente en *cold boot*. Robustez de cola RX para prevenir *stale ACKs*.
+- [ ] **Fase 4b:** (Auditoría Técnica Bloque 2) Cierre de Seguridad y Aprovisionamiento Real.
+- [ ] **Fase 4c:** (Integración Ecosistema) Pruebas End-to-End (E2E) con el Edge-Telemetry-Gateway. Validación de la inyección asíncrona de comandos (`CMD_RUN_SELF_TEST`) y sincronización automática de Epoch en el `GatewayAck`.
 - [ ] **Fase 5:** (Aprovisionamiento Enterprise) Validación E2E con la App Móvil (Setae Connect). Lectura óptica de Código QR y configuración Zero-Touch vía BLE (MAC e inyección del Epoch desde el smartphone del operario).
 - [ ] **Fase 6:** Inteligencia Embebida BSEC 3.0 y TinyML. Despliegue de redes neuronales ligeras para Clasificación Química en el Edge (Ej. detección discriminada de tipos de VOCs o gases nocivos).
 
