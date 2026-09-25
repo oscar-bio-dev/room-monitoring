@@ -24,6 +24,7 @@
 #include "esp_system.h"
 #include "esp_random.h"
 #include "esp_log.h"
+#include "config_manager.h"
 
 // Componentes modulares
 #include "i2c_bus.h"
@@ -712,8 +713,11 @@ static void run_production_cycle(bool bme_initialized) {
             /* Sanity bounds: mínimo 10s, máximo 310s */
             if (sleep_us < 10000000LL)
                 sleep_us = 10000000LL;
-            if (sleep_us > 310000000LL)
-                sleep_us = 310000000LL;
+            uint32_t interval = config_manager_get()->monitoring_interval_sec;
+            if (interval == 0)
+                interval = 300;
+            if (sleep_us > (interval + 10) * 1000000LL)
+                sleep_us = (interval + 10) * 1000000LL;
 
             ESP_LOGI(TAG, "💤 Smart Light-Sleep (%lld s) [BSEC-synced, next_call in %lld s]", sleep_us / 1000000LL,
                      (next_bsec_ns - now_ns) / 1000000000LL);
@@ -813,7 +817,8 @@ static void run_production_cycle(bool bme_initialized) {
                 if (deep_sleep_us < 1000000LL)
                     deep_sleep_us = 1000000LL;
             } else {
-                deep_sleep_us = 285000000LL;
+                uint32_t interval = config_manager_get()->monitoring_interval_sec;
+                deep_sleep_us     = (interval > 0 ? interval : 300) * 1000000LL;
             }
 
             ESP_LOGI(TAG, "💤 Deep-Sleep (%lld s)", deep_sleep_us / 1000000LL);
@@ -990,13 +995,19 @@ void app_main(void) {
              (unsigned int) esp_get_free_heap_size());
 #endif
 
+    config_manager_init();
+
     ESP_LOGI(TAG, "Delaying 1000ms for sensors to release I2C bus...");
     vTaskDelay(pdMS_TO_TICKS(1000));
 
 #ifndef CONFIG_ENABLE_DEEP_SLEEP
-    ESP_LOGI(TAG, "🚀 BLE Provisioning Phase (State A)");
-    // 300 segundos (5 minutos) de Timeout. Si no se provee, pasamos a State B.
-    run_ble_provisioning_loop_blocking(300);
+    if (!config_manager_get()->is_provisioned) {
+        ESP_LOGI(TAG, "🚀 BLE Provisioning Phase (State A)");
+        // 300 segundos (5 minutos) de Timeout. Si no se provee, pasamos a State B.
+        run_ble_provisioning_loop_blocking(300);
+    } else {
+        ESP_LOGI(TAG, "✅ Device provisioned in NVS. Skipping BLE.");
+    }
     ESP_LOGI(TAG, "✅ Entering State B: I2C Orchestration and Sensors");
 #endif
 

@@ -33,17 +33,18 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
         .characteristics = (struct ble_gatt_chr_def[]){{
                                                            .uuid      = &gatt_mac_uuid.u,
                                                            .access_cb = gatt_svr_chr_access,
-                                                           .flags     = BLE_GATT_CHR_F_WRITE,
+                                                           .flags     = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC,
                                                        },
                                                        {
                                                            .uuid      = &gatt_interval_uuid.u,
                                                            .access_cb = gatt_svr_chr_access,
-                                                           .flags     = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+                                                           .flags     = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC |
+                                                                    BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC,
                                                        },
                                                        {
                                                            .uuid      = &gatt_frc_uuid.u,
                                                            .access_cb = gatt_svr_chr_access,
-                                                           .flags     = BLE_GATT_CHR_F_WRITE,
+                                                           .flags     = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC,
                                                        },
                                                        {
                                                            0, // No more characteristics in this service
@@ -185,7 +186,12 @@ bool run_ble_provisioning_loop_blocking(uint32_t timeout_sec) {
     rc = ble_gatts_add_svcs(gatt_svr_svcs);
     assert(rc == 0);
 
-    ble_hs_cfg.sync_cb = ble_app_on_sync;
+    // Activar Seguridad BLE (Bonding & Secure Connections)
+    ble_hs_cfg.sync_cb    = ble_app_on_sync;
+    ble_hs_cfg.sm_io_cap  = BLE_SM_IO_CAP_NO_IO;
+    ble_hs_cfg.sm_bonding = 1;
+    ble_hs_cfg.sm_mitm    = 0;
+    ble_hs_cfg.sm_sc      = 1;
 
     nimble_port_freertos_init(ble_host_task);
 

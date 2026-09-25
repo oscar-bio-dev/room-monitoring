@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
+#include "config_manager.h"
 #include "esp_netif.h"
 #include "esp_event.h"
 #include "freertos/FreeRTOS.h"
@@ -74,10 +75,17 @@ void network_manager_init(void) {
         rx_command_queue = xQueueCreate(5, sizeof(rx_packet_t));
     }
 
-    /* Parsear la MAC del Gateway desde Kconfig */
-    parse_mac_string(CONFIG_ESPNOW_GATEWAY_MAC, gateway_mac);
-    ESP_LOGI(TAG, "Gateway MAC: %02X:%02X:%02X:%02X:%02X:%02X", gateway_mac[0], gateway_mac[1], gateway_mac[2],
-             gateway_mac[3], gateway_mac[4], gateway_mac[5]);
+    /* Leer la MAC del Gateway desde NVS si está aprovisionado, sino fallback Kconfig */
+    const nvs_node_config_t *node_cfg = config_manager_get();
+    if (node_cfg && node_cfg->is_provisioned) {
+        memcpy(gateway_mac, node_cfg->gateway_mac, 6);
+        ESP_LOGI(TAG, "Gateway MAC (desde NVS): %02X:%02X:%02X:%02X:%02X:%02X", gateway_mac[0], gateway_mac[1],
+                 gateway_mac[2], gateway_mac[3], gateway_mac[4], gateway_mac[5]);
+    } else {
+        parse_mac_string(CONFIG_ESPNOW_GATEWAY_MAC, gateway_mac);
+        ESP_LOGW(TAG, "No aprovisionado. Usando Gateway MAC (Kconfig): %02X:%02X:%02X:%02X:%02X:%02X", gateway_mac[0],
+                 gateway_mac[1], gateway_mac[2], gateway_mac[3], gateway_mac[4], gateway_mac[5]);
+    }
 
     /* Inicializar NVS (Requerido por esp_wifi_init para calibración PHY) */
     esp_err_t ret = nvs_flash_init();
