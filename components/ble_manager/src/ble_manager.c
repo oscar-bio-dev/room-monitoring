@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "esp_mac.h"
 
 static const char *TAG = "ble_manager";
 
@@ -68,7 +69,10 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struc
 
                 nvs_node_config_t cfg = *config_manager_get();
                 memcpy(cfg.gateway_mac, mac, 6);
-                config_manager_save(&cfg);
+                if (config_manager_save(&cfg) != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to save MAC to NVS");
+                    return BLE_ATT_ERR_UNLIKELY;
+                }
 
                 ESP_LOGI(TAG, "Gateway MAC updated via BLE");
                 is_provisioned_event = true; // Trigger exit
@@ -85,7 +89,10 @@ static int gatt_svr_chr_access(uint16_t conn_handle, uint16_t attr_handle, struc
 
                 nvs_node_config_t cfg       = *config_manager_get();
                 cfg.monitoring_interval_sec = interval;
-                config_manager_save(&cfg);
+                if (config_manager_save(&cfg) != ESP_OK) {
+                    ESP_LOGE(TAG, "Failed to save interval to NVS");
+                    return BLE_ATT_ERR_UNLIKELY;
+                }
 
                 ESP_LOGI(TAG, "Interval updated to %lu via BLE", (unsigned long) interval);
                 return 0;
@@ -137,10 +144,16 @@ static int bleprph_gap_event(struct ble_gap_event *event, void *arg) {
         case BLE_GAP_EVENT_PASSKEY_ACTION:
             ESP_LOGI(TAG, "Passkey Action Request");
             if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
+                uint8_t mac[6];
+                esp_read_mac(mac, ESP_MAC_WIFI_STA);
+                uint32_t pin = ((mac[3] << 16) | (mac[4] << 8) | mac[5]) % 1000000;
+
                 struct ble_sm_io pk;
                 pk.action  = event->passkey.params.action;
-                pk.passkey = 123456; // Static passkey for production nodes
-                ESP_LOGW(TAG, "Enter Passkey on client: %06d", (int) pk.passkey);
+                pk.passkey = pin;
+                ESP_LOGW(TAG, "===============================================");
+                ESP_LOGW(TAG, "🔐 Enter Passkey on client: %06lu", (unsigned long) pk.passkey);
+                ESP_LOGW(TAG, "===============================================");
                 ble_sm_inject_io(event->passkey.conn_handle, &pk);
             }
             break;

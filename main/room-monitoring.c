@@ -62,6 +62,7 @@ RTC_DATA_ATTR bool           discovery_done   = false;
 RTC_DATA_ATTR uint8_t        dynamic_bme_addr = 0x76;
 RTC_DATA_ATTR uint8_t        dynamic_bmv_addr = 0x54;
 RTC_DATA_ATTR uint32_t       node_sequence    = 0;
+RTC_DATA_ATTR uint32_t       rtc_sleep_cycles = 0;
 RTC_DATA_ATTR static float   rtc_iaq = 0, rtc_temp = 0, rtc_hum = 0;
 RTC_DATA_ATTR static float   rtc_pressure = 0, rtc_gas_res = 0;
 RTC_DATA_ATTR static float   rtc_eco2 = 0, rtc_bvoc = 0, rtc_tvoc = 0;
@@ -73,11 +74,14 @@ static bool     discovery_done   = false;
 static uint8_t  dynamic_bme_addr = 0x76;
 static uint8_t  dynamic_bmv_addr = 0x54;
 static uint32_t node_sequence    = 0;
+static uint32_t rtc_sleep_cycles = 0;
 static float    rtc_iaq = 0, rtc_temp = 0, rtc_hum = 0;
 static float    rtc_pressure = 0, rtc_gas_res = 0;
 static float    rtc_eco2 = 0, rtc_bvoc = 0, rtc_tvoc = 0;
 static uint8_t  rtc_acc = 0;
 #endif
+
+static uint32_t light_sleep_cycles = 0;
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Handlers de sensores I2C
@@ -277,7 +281,7 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
     }
 
     // Diagnóstico
-    data.sleep_cycles     = node_sequence;
+    data.sleep_cycles     = rtc_sleep_cycles + light_sleep_cycles;
     data.has_sleep_cycles = true;
 
     // Bandera de Calibración
@@ -305,6 +309,7 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
         bool gateway_accepted = false;
 
         if (network_manager_send(tx_buffer, stream.bytes_written + 1) == ESP_OK) {
+            current_errors &= ~ERR_ESPNOW_TX;
             ESP_LOGI(TAG, "📡 Telemetría enviada (%d bytes)", (int) stream.bytes_written + 1);
 
             // Ventana de Recepción Downlink (50ms) - Downlink Spooling Fast-ACK
@@ -338,6 +343,9 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
                     }
                 }
             }
+        } else {
+            current_errors |= ERR_ESPNOW_TX;
+            ESP_LOGE(TAG, "Fallo transmisión ESP-NOW");
         }
 
         if (gateway_accepted) {
@@ -380,7 +388,11 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
             }
         } else {
             ESP_LOGW(TAG, "⚠️ Sin GatewayAck (0x20). Guardando en Caja Negra...");
-            storage_manager_save_offline(&data);
+            if (storage_manager_save_offline(&data) != ESP_OK) {
+                current_errors |= ERR_SD_CARD;
+            } else {
+                current_errors &= ~ERR_SD_CARD;
+            }
         }
     } else {
         ESP_LOGE(TAG, "Error empaquetando Protobuf");
@@ -436,6 +448,7 @@ static void run_warmup_phase(bool bme_initialized) {
             // 3. Light-Sleep de ~900ms (ajustado: 1000ms - 50ms cooldown - ~50ms medición)
             esp_sleep_enable_timer_wakeup(900000ULL);
             esp_light_sleep_start();
+            light_sleep_cycles++;
         }
 
         // Leer SCD41 (ya pasaron los 5s)
@@ -596,7 +609,10 @@ static void run_production_cycle(bool bme_initialized) {
                              bmv080_data.pm2_5_count, bmv080_data.pm10_count);
                 }
                 if (bmv080_data.is_obstructed) {
+                    current_errors |= ERR_BMV080_DIRTY;
                     ESP_LOGW(TAG, "BMV080  ⚠️ OBSTRUCTED — lente sucia");
+                } else {
+                    current_errors &= ~ERR_BMV080_DIRTY;
                 }
                 ESP_LOGI(TAG, "Runtime: heap=%u bytes", (unsigned int) esp_get_free_heap_size());
 
@@ -618,6 +634,7 @@ static void run_production_cycle(bool bme_initialized) {
 
             esp_sleep_enable_timer_wakeup((uint64_t) sleep_us);
             esp_light_sleep_start();
+            light_sleep_cycles++;
         }
 
     } else {
@@ -682,6 +699,7 @@ static void run_production_cycle(bool bme_initialized) {
                 }
                 esp_sleep_enable_timer_wakeup(950000ULL);
                 esp_light_sleep_start();
+                light_sleep_cycles++;
             }
 
             /* ── PASO 5: Recolección de Datos ────────────────────────── */
