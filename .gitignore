@@ -30,6 +30,7 @@ env/
 tmp/
 tmp_monitor.log
 *.ledger.md
+.ledger.md
 
 # Test logs (hardware-in-the-loop)
 log*.md
