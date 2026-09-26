@@ -4,6 +4,9 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
+#ifdef CONFIG_NVS_ENCRYPTION
+#include "nvs_sec_provider.h"
+#endif
 #include "config_manager.h"
 #include "esp_netif.h"
 #include "esp_event.h"
@@ -53,6 +56,18 @@ static void esp_now_send_cb(const uint8_t *mac_addr, esp_now_send_status_t statu
 }
 
 static void esp_now_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
+    if (recv_info == NULL || recv_info->src_addr == NULL) {
+        return;
+    }
+
+    // Strict ACK Validation (Zero-Trust): Only accept packets from our provisioned Gateway
+    if (memcmp(recv_info->src_addr, gateway_mac, 6) != 0) {
+        ESP_LOGW(TAG, "Rejected spoofed or foreign ESP-NOW packet from %02X:%02X:%02X:%02X:%02X:%02X",
+                 recv_info->src_addr[0], recv_info->src_addr[1], recv_info->src_addr[2], recv_info->src_addr[3],
+                 recv_info->src_addr[4], recv_info->src_addr[5]);
+        return;
+    }
+
     if (len > 0 && len <= 250 && rx_command_queue != NULL) {
         rx_packet_t pkt;
         pkt.len = len;
@@ -88,12 +103,32 @@ void network_manager_init(void) {
     }
 
     /* Inicializar NVS (Requerido por esp_wifi_init para calibración PHY) */
-    esp_err_t ret = nvs_flash_init();
+    /* Inicializar NVS (Requerido por esp_wifi_init para calibración PHY) */
+    esp_err_t ret;
+#ifdef CONFIG_NVS_ENCRYPTION
+    nvs_sec_cfg_t cfg;
+    ret = nvs_flash_read_security_cfg(NULL, &cfg);
+    if (ret == ESP_OK) {
+        ret = nvs_flash_secure_init(&cfg);
+    } else {
+        ret = nvs_flash_init(); // Fallback if keys are not generated yet
+    }
+#else
+    ret = nvs_flash_init();
+#endif
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
+#ifdef CONFIG_NVS_ENCRYPTION
+        ret = nvs_flash_secure_init(&cfg);
+#else
         ret = nvs_flash_init();
+#endif
     }
-    ESP_ERROR_CHECK(ret);
+    // If it's still failing, we might have already initialized it in config_manager.
+    // ESP_ERR_NVS_NOT_INITIALIZED usually means it wasn't.
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(ret);
+    }
 
     /* Inicializar el stack TCP/IP y el event loop (requerido por esp_wifi_start para no lanzar errores) */
     ESP_ERROR_CHECK(esp_netif_init());

@@ -2,6 +2,10 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
+#ifdef CONFIG_NVS_ENCRYPTION
+#include "nvs_sec_provider.h"
+#endif
 #include <string.h>
 
 static const char       *TAG = "config_manager";
@@ -12,10 +16,28 @@ static const char *KEY_MAC       = "gw_mac";
 static const char *KEY_INTERVAL  = "interval";
 
 esp_err_t config_manager_init(void) {
-    esp_err_t err = nvs_flash_init();
+    esp_err_t err;
+#ifdef CONFIG_NVS_ENCRYPTION
+    nvs_sec_cfg_t cfg;
+    err = nvs_flash_read_security_cfg(NULL, &cfg);
+    if (err == ESP_ERR_NVS_KEYS_NOT_INITIALIZED) {
+        ESP_LOGI(TAG, "NVS key partition empty, generating keys");
+        err = nvs_flash_generate_keys(NULL, &cfg);
+        if (err != ESP_OK)
+            return err;
+    }
+    err = nvs_flash_secure_init(&cfg);
+#else
+    err = nvs_flash_init();
+#endif
+
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
+#ifdef CONFIG_NVS_ENCRYPTION
+        err = nvs_flash_secure_init(&cfg);
+#else
         err = nvs_flash_init();
+#endif
     }
     ESP_ERROR_CHECK(err);
 

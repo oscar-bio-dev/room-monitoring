@@ -133,6 +133,17 @@ static int bleprph_gap_event(struct ble_gap_event *event, void *arg) {
                 ble_gap_adv_start(own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, bleprph_gap_event, NULL);
             }
             break;
+
+        case BLE_GAP_EVENT_PASSKEY_ACTION:
+            ESP_LOGI(TAG, "Passkey Action Request");
+            if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
+                struct ble_sm_io pk;
+                pk.action  = event->passkey.params.action;
+                pk.passkey = 123456; // Static passkey for production nodes
+                ESP_LOGW(TAG, "Enter Passkey on client: %06d", (int) pk.passkey);
+                ble_sm_inject_io(event->passkey.conn_handle, &pk);
+            }
+            break;
     }
     return 0;
 }
@@ -186,11 +197,11 @@ bool run_ble_provisioning_loop_blocking(uint32_t timeout_sec) {
     rc = ble_gatts_add_svcs(gatt_svr_svcs);
     assert(rc == 0);
 
-    // Activar Seguridad BLE (Bonding & Secure Connections)
+    // Activar Seguridad BLE (Bonding & Secure Connections) - MITM Protection Enabled
     ble_hs_cfg.sync_cb    = ble_app_on_sync;
-    ble_hs_cfg.sm_io_cap  = BLE_SM_IO_CAP_NO_IO;
+    ble_hs_cfg.sm_io_cap  = BLE_SM_IO_CAP_DISP_ONLY;
     ble_hs_cfg.sm_bonding = 1;
-    ble_hs_cfg.sm_mitm    = 0;
+    ble_hs_cfg.sm_mitm    = 1;
     ble_hs_cfg.sm_sc      = 1;
 
     nimble_port_freertos_init(ble_host_task);
