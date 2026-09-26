@@ -312,10 +312,10 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
             size_t  rx_len = 0;
             if (network_manager_receive_cmd(rx_buf, &rx_len, 50) == ESP_OK) {
                 if (rx_len > 0 && rx_buf[0] == 0x20) { // Header: GatewayAck
-                    gateway_accepted               = true;
                     telemetry_GatewayAck ack       = telemetry_GatewayAck_init_zero;
                     pb_istream_t         rx_stream = pb_istream_from_buffer(&rx_buf[1], rx_len - 1);
                     if (pb_decode(&rx_stream, telemetry_GatewayAck_fields, &ack)) {
+                        gateway_accepted = true;
 
                         // 1. Sincronización Temporal Pasiva
                         if (ack.has_current_epoch_s && ack.current_epoch_s > 1700000000) {
@@ -357,8 +357,13 @@ static void transmit_telemetry(const scd41_data_t *scd41_data, const bmv080_read
                         if (network_manager_send(tx_buffer, off_stream.bytes_written + 1) == ESP_OK) {
                             uint8_t rx_b[250];
                             size_t  r_len;
-                            if (network_manager_receive_cmd(rx_b, &r_len, 50) == ESP_OK && rx_b[0] == 0x20) {
-                                batch_ack = true;
+                            if (network_manager_receive_cmd(rx_b, &r_len, 50) == ESP_OK && r_len > 0 &&
+                                rx_b[0] == 0x20) {
+                                telemetry_GatewayAck b_ack       = telemetry_GatewayAck_init_zero;
+                                pb_istream_t         b_rx_stream = pb_istream_from_buffer(&rx_b[1], r_len - 1);
+                                if (pb_decode(&b_rx_stream, telemetry_GatewayAck_fields, &b_ack)) {
+                                    batch_ack = true;
+                                }
                             }
                         }
 

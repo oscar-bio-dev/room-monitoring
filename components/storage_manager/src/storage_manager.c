@@ -53,6 +53,27 @@ static esp_err_t mount_sd(void) {
         spi_bus_free(host.slot);
         return ret;
     }
+
+    // Crash recovery
+    FILE *f_old = fopen(MOUNT_POINT "/offline_old.dat", "rb");
+    if (f_old) {
+        fclose(f_old);
+        FILE *f_off = fopen(OFFLINE_FILE, "rb");
+        if (!f_off) {
+            FILE *f_tmp = fopen(TMP_FILE, "rb");
+            if (f_tmp) {
+                fclose(f_tmp);
+                rename(TMP_FILE, OFFLINE_FILE);
+            } else {
+                rename(MOUNT_POINT "/offline_old.dat", OFFLINE_FILE);
+            }
+        } else {
+            fclose(f_off);
+        }
+        remove(MOUNT_POINT "/offline_old.dat");
+    }
+    remove(TMP_FILE);
+
     return ESP_OK;
 }
 
@@ -176,7 +197,10 @@ esp_err_t storage_manager_get_offline_batch(telemetry_TelemetryPayload *batch, s
     if (mount_sd() != ESP_OK)
         return ESP_FAIL;
 
-    FILE *f = fopen(OFFLINE_FILE, "rb");
+    FILE *f = fopen(MOUNT_POINT "/offline_bak.dat", "rb");
+    if (!f) {
+        f = fopen(OFFLINE_FILE, "rb");
+    }
     if (!f) {
         unmount_sd();
         return ESP_OK; // No file, no items
@@ -203,7 +227,14 @@ esp_err_t storage_manager_clear_offline_batch(size_t items_to_remove) {
     if (mount_sd() != ESP_OK)
         return ESP_FAIL;
 
-    FILE *f = fopen(OFFLINE_FILE, "rb");
+    const char *target_file = OFFLINE_FILE;
+    FILE       *f_bak       = fopen(MOUNT_POINT "/offline_bak.dat", "rb");
+    if (f_bak) {
+        target_file = MOUNT_POINT "/offline_bak.dat";
+        fclose(f_bak);
+    }
+
+    FILE *f = fopen(target_file, "rb");
     if (!f) {
         unmount_sd();
         return ESP_OK;
@@ -245,17 +276,18 @@ esp_err_t storage_manager_clear_offline_batch(size_t items_to_remove) {
     fclose(f);
     fclose(ftmp);
 
-    // Replace original file
-    remove(OFFLINE_FILE);
-    rename(TMP_FILE, OFFLINE_FILE);
+    // Replace original file (Crash-safe)
+    rename(target_file, MOUNT_POINT "/offline_old.dat");
+    rename(TMP_FILE, target_file);
+    remove(MOUNT_POINT "/offline_old.dat");
 
     // If file is empty, delete it
-    f = fopen(OFFLINE_FILE, "rb");
+    f = fopen(target_file, "rb");
     if (f) {
         fseek(f, 0, SEEK_END);
         if (ftell(f) == 0) {
             fclose(f);
-            remove(OFFLINE_FILE);
+            remove(target_file);
         } else {
             fclose(f);
         }
