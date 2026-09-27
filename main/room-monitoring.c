@@ -872,6 +872,7 @@ static void run_production_cycle(bool bme_initialized) {
             gpio_hold_en(I2C_MASTER_SCL_IO);
             gpio_deep_sleep_hold_en();
 
+            rtc_sleep_cycles++;
             esp_sleep_enable_timer_wakeup((uint64_t) deep_sleep_us);
             esp_deep_sleep_start();
         }

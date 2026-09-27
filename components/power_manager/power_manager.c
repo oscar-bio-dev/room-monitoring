@@ -152,6 +152,8 @@ void power_manager_execute_sleep_cycle(void) {
             gpio_hold_en(I2C_MASTER_SCL_IO);
             gpio_deep_sleep_hold_en();
 
+            extern uint32_t rtc_sleep_cycles;
+            rtc_sleep_cycles++;
             esp_sleep_enable_timer_wakeup(sleep_us);
             esp_deep_sleep_start();
         }
